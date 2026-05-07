@@ -316,8 +316,7 @@ export const TimelineItem = memo(
     )
     const mediaFileName = useMediaLibraryStore(
       useCallback(
-        (s) =>
-          item.mediaId ? (s.mediaItems.find((m) => m.id === item.mediaId)?.fileName ?? '') : '',
+        (s) => (item.mediaId ? (s.mediaById[item.mediaId]?.fileName ?? '') : ''),
         [item.mediaId],
       ),
     )
@@ -399,7 +398,7 @@ export const TimelineItem = memo(
 
     const mediaForItem = useMediaLibraryStore(
       useCallback(
-        (s) => (item.mediaId ? (s.mediaItems.find((m) => m.id === item.mediaId) ?? null) : null),
+        (s) => (item.mediaId ? (s.mediaById[item.mediaId] ?? null) : null),
         [item.mediaId],
       ),
     )

@@ -12,6 +12,10 @@ interface TimelineSettingsState {
   isDirty: boolean
   /** True while loadTimeline() is in progress - used to coordinate initial player sync */
   isTimelineLoading: boolean
+  /** Project currently being restored into the timeline stores, if any. */
+  loadingProjectId: string | null
+  /** Last project whose timeline stores were fully restored and are safe to display. */
+  loadedProjectId: string | null
 }
 
 interface TimelineSettingsActions {
@@ -23,6 +27,10 @@ interface TimelineSettingsActions {
   markDirty: () => void
   markClean: () => void
   setTimelineLoading: (loading: boolean) => void
+  beginTimelineHydration: (projectId: string) => void
+  completeTimelineHydration: (projectId: string) => void
+  failTimelineHydration: (projectId: string) => void
+  resetTimelineHydration: () => void
 }
 
 export const useTimelineSettingsStore = create<TimelineSettingsState & TimelineSettingsActions>()(
@@ -33,6 +41,8 @@ export const useTimelineSettingsStore = create<TimelineSettingsState & TimelineS
     snapEnabled: true,
     isDirty: false,
     isTimelineLoading: true, // Start true - set false after loadTimeline completes
+    loadingProjectId: null,
+    loadedProjectId: null,
 
     // Actions
     setFps: (fps) => set({ fps }),
@@ -44,6 +54,33 @@ export const useTimelineSettingsStore = create<TimelineSettingsState & TimelineS
       if (!get().isDirty) set({ isDirty: true })
     },
     markClean: () => set({ isDirty: false }),
-    setTimelineLoading: (loading) => set({ isTimelineLoading: loading }),
+    setTimelineLoading: (loading) =>
+      set((state) => ({
+        isTimelineLoading: loading,
+        loadingProjectId: loading ? state.loadingProjectId : null,
+      })),
+    beginTimelineHydration: (projectId) =>
+      set({
+        isTimelineLoading: true,
+        loadingProjectId: projectId,
+        loadedProjectId: null,
+      }),
+    completeTimelineHydration: (projectId) =>
+      set({
+        isTimelineLoading: false,
+        loadingProjectId: null,
+        loadedProjectId: projectId,
+      }),
+    failTimelineHydration: (projectId) =>
+      set((state) => ({
+        isTimelineLoading: false,
+        loadingProjectId: state.loadingProjectId === projectId ? null : state.loadingProjectId,
+      })),
+    resetTimelineHydration: () =>
+      set({
+        isTimelineLoading: true,
+        loadingProjectId: null,
+        loadedProjectId: null,
+      }),
   }),
 )

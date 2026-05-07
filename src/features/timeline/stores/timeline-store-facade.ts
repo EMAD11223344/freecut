@@ -48,6 +48,9 @@ let lastFpsRef: unknown = null
 let lastScrollPositionRef: unknown = null
 let lastSnapEnabledRef: unknown = null
 let lastIsDirtyRef: unknown = null
+let lastIsTimelineLoadingRef: unknown = null
+let lastLoadingProjectIdRef: unknown = null
+let lastLoadedProjectIdRef: unknown = null
 
 /**
  * Get cached snapshot, rebuilding only if underlying state changed.
@@ -71,7 +74,10 @@ function getSnapshot(): TimelineState & TimelineActions {
     lastFpsRef !== settingsState.fps ||
     lastScrollPositionRef !== settingsState.scrollPosition ||
     lastSnapEnabledRef !== settingsState.snapEnabled ||
-    lastIsDirtyRef !== settingsState.isDirty
+    lastIsDirtyRef !== settingsState.isDirty ||
+    lastIsTimelineLoadingRef !== settingsState.isTimelineLoading ||
+    lastLoadingProjectIdRef !== settingsState.loadingProjectId ||
+    lastLoadedProjectIdRef !== settingsState.loadedProjectId
 
   if (!cachedSnapshot || stateChanged) {
     // Update tracked references
@@ -86,6 +92,9 @@ function getSnapshot(): TimelineState & TimelineActions {
     lastScrollPositionRef = settingsState.scrollPosition
     lastSnapEnabledRef = settingsState.snapEnabled
     lastIsDirtyRef = settingsState.isDirty
+    lastIsTimelineLoadingRef = settingsState.isTimelineLoading
+    lastLoadingProjectIdRef = settingsState.loadingProjectId
+    lastLoadedProjectIdRef = settingsState.loadedProjectId
 
     // Rebuild cached snapshot
     cachedSnapshot = {
@@ -101,6 +110,9 @@ function getSnapshot(): TimelineState & TimelineActions {
       scrollPosition: settingsState.scrollPosition,
       snapEnabled: settingsState.snapEnabled,
       isDirty: settingsState.isDirty,
+      isTimelineLoading: settingsState.isTimelineLoading,
+      loadingProjectId: settingsState.loadingProjectId,
+      loadedProjectId: settingsState.loadedProjectId,
 
       // Actions (static references, never change)
       setTracks: timelineActions.setTracks,

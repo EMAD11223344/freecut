@@ -851,8 +851,18 @@ export async function loadTimeline(
   projectId: string,
   options: LoadTimelineOptions = {},
 ): Promise<void> {
-  // Mark loading started - used to coordinate initial player sync
-  useTimelineSettingsStore.getState().setTimelineLoading(true)
+  // Mark loading before any UI-visible state swap, then clear stale timeline
+  // content so old-project clips cannot flash while the new project hydrates.
+  useTimelineSettingsStore.getState().beginTimelineHydration(projectId)
+  useItemsStore.getState().setTracks([])
+  useItemsStore.getState().setItems([])
+  useTransitionsStore.getState().setTransitions([])
+  useKeyframesStore.getState().setKeyframes([])
+  useMarkersStore.getState().setMarkers([])
+  useMarkersStore.getState().setInPoint(null)
+  useMarkersStore.getState().setOutPoint(null)
+  useCompositionsStore.getState().setCompositions([])
+  useCompositionNavigationStore.getState().resetToRoot()
 
   try {
     const rawProject = await getProject(projectId)
@@ -1028,12 +1038,13 @@ export async function loadTimeline(
       useMediaLibraryStore.getState().setOrphanedClips([])
     }
 
-    // Mark loading complete - signals player sync can proceed
-    useTimelineSettingsStore.getState().setTimelineLoading(false)
+    // Mark loading complete only after all stores are restored and media references validated.
+    useTimelineSettingsStore.getState().completeTimelineHydration(projectId)
   } catch (error) {
     logger.error('Failed to load timeline:', error)
-    // Still mark loading complete on error so UI isn't stuck
-    useTimelineSettingsStore.getState().setTimelineLoading(false)
+    // Still mark loading complete on error so UI isn't stuck; keep loadedProjectId
+    // null so project-specific gates do not show stale clips as current.
+    useTimelineSettingsStore.getState().failTimelineHydration(projectId)
     throw error
   }
 }

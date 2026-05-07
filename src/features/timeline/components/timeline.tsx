@@ -38,6 +38,7 @@ import { clearMediaDragData } from '@/features/timeline/deps/media-library-resol
 import { useNewTrackZonePreviewStore } from '../stores/new-track-zone-preview-store'
 import { useTrackDropPreviewStore } from '../stores/track-drop-preview-store'
 import { clearAllTimelineDropPreviewOwners } from '../utils/drop-preview-owner'
+import { useProjectStore } from '../deps/projects'
 import {
   isDragEventOverTimelineDropTarget,
   isExternalTimelineDragEvent,
@@ -141,6 +142,15 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
   const toggleColorScopesOpen = useEditorStore((s) => s.toggleColorScopesOpen)
   const toggleKeyframeEditorOpen = useEditorStore((s) => s.toggleKeyframeEditorOpen)
   const setTimelineTracks = useTimelineStore((s) => s.setTracks)
+  const currentProjectId = useProjectStore((s) => s.currentProject?.id ?? null)
+  const isTimelineLoading = useTimelineSettingsStore((s) => s.isTimelineLoading)
+  const loadingProjectId = useTimelineSettingsStore((s) => s.loadingProjectId)
+  const loadedProjectId = useTimelineSettingsStore((s) => s.loadedProjectId)
+  const isTimelineHydratingCurrentProject =
+    !!currentProjectId &&
+    (loadingProjectId === currentProjectId ||
+      isTimelineLoading ||
+      loadedProjectId !== currentProjectId)
 
   useEffect(() => {
     const clearExternalDropPreviews = () => {
@@ -876,107 +886,119 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
         className="flex-1 flex overflow-hidden min-h-0"
         onMouseDown={handleTimelineAreaMouseDown}
       >
-        {/* Track Headers Sidebar */}
-        <div
-          className="border-r border-border panel-bg flex-shrink-0 flex flex-col overflow-x-hidden"
-          style={{ width: EDITOR_LAYOUT_CSS_VALUES.timelineSidebarWidth }}
-        >
-          {/* Tracks label with controls */}
-          <div
-            className="flex items-center justify-between px-3 border-b border-border bg-secondary/20 flex-shrink-0"
-            style={{ height: EDITOR_LAYOUT_CSS_VALUES.timelineTracksHeaderHeight }}
-          >
-            <span className="text-xs text-muted-foreground font-mono uppercase tracking-wider">
-              Tracks
-            </span>
-            <div className="flex items-center gap-1">
-              {/* Add track button */}
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                onClick={handleAddTrack}
-                title={
-                  nextTrackKind === 'audio'
-                    ? 'Add audio track to audio section'
-                    : 'Add video track at top'
-                }
-              >
-                <Plus className="w-3 h-3" />
-              </Button>
-              {/* Remove track button */}
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                onClick={handleRemoveTracks}
-                disabled={tracks.length === 0 || (!activeTrackId && selectedTrackIds.length === 0)}
-                title={
-                  tracks.length === 0
-                    ? 'No tracks to remove'
-                    : !activeTrackId && selectedTrackIds.length === 0
-                      ? 'Select a track to remove'
-                      : selectedTrackIds.length > 0
-                        ? `Remove ${selectedTrackIds.length} selected track(s)`
-                        : 'Remove active track'
-                }
-              >
-                <Minus className="w-3 h-3" />
-              </Button>
-            </div>
+        {isTimelineHydratingCurrentProject ? (
+          <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
+            Loading timeline…
           </div>
+        ) : (
+          <>
+            {/* Track Headers Sidebar */}
+            <div
+              className="border-r border-border panel-bg flex-shrink-0 flex flex-col overflow-x-hidden"
+              style={{ width: EDITOR_LAYOUT_CSS_VALUES.timelineSidebarWidth }}
+            >
+              {/* Tracks label with controls */}
+              <div
+                className="flex items-center justify-between px-3 border-b border-border bg-secondary/20 flex-shrink-0"
+                style={{ height: EDITOR_LAYOUT_CSS_VALUES.timelineTracksHeaderHeight }}
+              >
+                <span className="text-xs text-muted-foreground font-mono uppercase tracking-wider">
+                  Tracks
+                </span>
+                <div className="flex items-center gap-1">
+                  {/* Add track button */}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={handleAddTrack}
+                    title={
+                      nextTrackKind === 'audio'
+                        ? 'Add audio track to audio section'
+                        : 'Add video track at top'
+                    }
+                  >
+                    <Plus className="w-3 h-3" />
+                  </Button>
+                  {/* Remove track button */}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={handleRemoveTracks}
+                    disabled={
+                      tracks.length === 0 || (!activeTrackId && selectedTrackIds.length === 0)
+                    }
+                    title={
+                      tracks.length === 0
+                        ? 'No tracks to remove'
+                        : !activeTrackId && selectedTrackIds.length === 0
+                          ? 'Select a track to remove'
+                          : selectedTrackIds.length > 0
+                            ? `Remove ${selectedTrackIds.length} selected track(s)`
+                            : 'Remove active track'
+                    }
+                  >
+                    <Minus className="w-3 h-3" />
+                  </Button>
+                </div>
+              </div>
 
-          {/* Track labels - synced scroll (no scrollbar) */}
-          <div ref={trackHeadersViewportRef} className="flex-1 overflow-hidden relative">
-            <div ref={trackHeadersRootRef} className="flex h-full min-h-0 flex-col">
-              {hasTrackSections ? (
-                <>
-                  {renderTrackHeadersSection(videoTracks, {
-                    section: 'video',
-                    height: videoPaneHeight,
-                    zoneHeight: videoZoneHeight,
-                    scrollRef: videoTrackHeadersScrollRef,
-                    dropIndicatorLocalIndex: videoDropIndicatorIndex,
-                    showTopDividerForFirstTrack: true,
-                  })}
-                  <TrackSectionDivider onMouseDown={handleSectionDividerMouseDown} />
-                  {renderTrackHeadersSection(audioTracks, {
-                    section: 'audio',
-                    height: audioPaneHeight,
-                    zoneHeight: audioZoneHeight,
-                    scrollRef: audioTrackHeadersScrollRef,
-                    dropIndicatorLocalIndex: audioDropIndicatorIndex,
-                    showTopDividerForFirstTrack: false,
-                  })}
-                </>
-              ) : (
-                renderTrackHeadersSection(singleSectionTracks, {
-                  section: singleSectionKind,
-                  height: singleSectionHeight,
-                  zoneHeight: singleSectionZoneHeight,
-                  scrollRef: allTrackHeadersScrollRef,
-                  dropIndicatorLocalIndex: singleDropIndicatorIndex,
-                  showTopDividerForFirstTrack: true,
-                })
-              )}
+              {/* Track labels - synced scroll (no scrollbar) */}
+              <div ref={trackHeadersViewportRef} className="flex-1 overflow-hidden relative">
+                <div ref={trackHeadersRootRef} className="flex h-full min-h-0 flex-col">
+                  {hasTrackSections ? (
+                    <>
+                      {renderTrackHeadersSection(videoTracks, {
+                        section: 'video',
+                        height: videoPaneHeight,
+                        zoneHeight: videoZoneHeight,
+                        scrollRef: videoTrackHeadersScrollRef,
+                        dropIndicatorLocalIndex: videoDropIndicatorIndex,
+                        showTopDividerForFirstTrack: true,
+                      })}
+                      <TrackSectionDivider onMouseDown={handleSectionDividerMouseDown} />
+                      {renderTrackHeadersSection(audioTracks, {
+                        section: 'audio',
+                        height: audioPaneHeight,
+                        zoneHeight: audioZoneHeight,
+                        scrollRef: audioTrackHeadersScrollRef,
+                        dropIndicatorLocalIndex: audioDropIndicatorIndex,
+                        showTopDividerForFirstTrack: false,
+                      })}
+                    </>
+                  ) : (
+                    renderTrackHeadersSection(singleSectionTracks, {
+                      section: singleSectionKind,
+                      height: singleSectionHeight,
+                      zoneHeight: singleSectionZoneHeight,
+                      scrollRef: allTrackHeadersScrollRef,
+                      dropIndicatorLocalIndex: singleDropIndicatorIndex,
+                      showTopDividerForFirstTrack: true,
+                    })
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
 
-        {/* Timeline Canvas */}
-        <TimelineContent
-          duration={duration}
-          tracks={visibleTracks}
-          scrollRef={timelineContentRef}
-          allTracksScrollRef={allTrackContentScrollRef}
-          videoTracksScrollRef={videoTrackContentScrollRef}
-          audioTracksScrollRef={audioTrackContentScrollRef}
-          videoPaneHeight={videoPaneHeight}
-          audioPaneHeight={audioPaneHeight}
-          onSectionDividerMouseDown={hasTrackSections ? handleSectionDividerMouseDown : undefined}
-          onZoomHandlersReady={setZoomHandlers}
-          onMetricsChange={setTimelineMetrics}
-        />
+            {/* Timeline Canvas */}
+            <TimelineContent
+              duration={duration}
+              tracks={visibleTracks}
+              scrollRef={timelineContentRef}
+              allTracksScrollRef={allTrackContentScrollRef}
+              videoTracksScrollRef={videoTrackContentScrollRef}
+              audioTracksScrollRef={audioTrackContentScrollRef}
+              videoPaneHeight={videoPaneHeight}
+              audioPaneHeight={audioPaneHeight}
+              onSectionDividerMouseDown={
+                hasTrackSections ? handleSectionDividerMouseDown : undefined
+              }
+              onZoomHandlersReady={setZoomHandlers}
+              onMetricsChange={setTimelineMetrics}
+            />
+          </>
+        )}
       </div>
 
       <div className="flex flex-shrink-0 overflow-hidden">

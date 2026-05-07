@@ -133,6 +133,7 @@ describe('TimelineStoreFacade', () => {
     useTimelineSettingsStore.getState().setScrollPosition(0)
     useTimelineSettingsStore.getState().setSnapEnabled(true)
     useTimelineSettingsStore.getState().markClean()
+    useTimelineSettingsStore.getState().resetTimelineHydration()
     useCompositionsStore.getState().setCompositions([])
     useCompositionNavigationStore.getState().resetToRoot()
     useTimelineCommandStore.getState().clearHistory()
@@ -1089,7 +1090,48 @@ describe('TimelineStoreFacade', () => {
       )
     })
 
-    it('marks timeline as not loading after completion', async () => {
+    it('marks timeline hydration as loading for the requested project before state is restored', async () => {
+      useTimelineSettingsStore.getState().completeTimelineHydration('old-project')
+      useItemsStore.getState().setTracks([
+        {
+          id: 'old-track',
+          name: 'Old Project Track',
+          order: 0,
+          height: 80,
+          locked: false,
+          visible: true,
+          muted: false,
+          solo: false,
+          items: [],
+        },
+      ])
+
+      let resolveProject!: (project: unknown) => void
+      indexedDbMocks.getProject.mockReturnValue(
+        new Promise((resolve) => {
+          resolveProject = resolve
+        }),
+      )
+      mediaValidationMocks.validateProjectMediaReferences.mockResolvedValue([])
+
+      const loadPromise = useTimelineStore.getState().loadTimeline('project-1')
+
+      expect(useTimelineSettingsStore.getState()).toMatchObject({
+        isTimelineLoading: true,
+        loadingProjectId: 'project-1',
+        loadedProjectId: null,
+      })
+      expect(useItemsStore.getState().tracks).toHaveLength(0)
+
+      resolveProject({
+        id: 'project-1',
+        metadata: { fps: 30 },
+        timeline: null,
+      })
+      await loadPromise
+    })
+
+    it('marks timeline as loaded for the project after completion', async () => {
       indexedDbMocks.getProject.mockResolvedValue({
         id: 'project-1',
         metadata: { fps: 30 },
@@ -1099,7 +1141,25 @@ describe('TimelineStoreFacade', () => {
 
       await useTimelineStore.getState().loadTimeline('project-1')
 
-      expect(useTimelineSettingsStore.getState().isTimelineLoading).toBe(false)
+      expect(useTimelineSettingsStore.getState()).toMatchObject({
+        isTimelineLoading: false,
+        loadingProjectId: null,
+        loadedProjectId: 'project-1',
+      })
+    })
+
+    it('clears loading without marking the failed project as loaded on load errors', async () => {
+      indexedDbMocks.getProject.mockRejectedValue(new Error('storage unavailable'))
+
+      await expect(useTimelineStore.getState().loadTimeline('project-1')).rejects.toThrow(
+        'storage unavailable',
+      )
+
+      expect(useTimelineSettingsStore.getState()).toMatchObject({
+        isTimelineLoading: false,
+        loadingProjectId: null,
+        loadedProjectId: null,
+      })
     })
 
     it('repairs legacy AV track layout inside compound clips on load', async () => {

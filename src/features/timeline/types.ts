@@ -47,6 +47,9 @@ export interface TimelineState {
   inPoint: number | null
   outPoint: number | null
   isDirty: boolean // Track unsaved changes
+  isTimelineLoading: boolean
+  loadingProjectId: string | null
+  loadedProjectId: string | null
 }
 
 export interface TimelineActions {
