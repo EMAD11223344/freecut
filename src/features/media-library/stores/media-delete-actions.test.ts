@@ -80,6 +80,7 @@ function createMockState(overrides: DeleteState = {}): MediaLibraryState & Media
     mediaItems: [makeMedia('media-1'), makeMedia('media-2')],
     mediaById: {},
     isLoading: false,
+    loadingProjectId: null,
     importingIds: [],
     error: null,
     errorLink: null,

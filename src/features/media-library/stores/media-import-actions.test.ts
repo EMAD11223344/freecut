@@ -117,6 +117,7 @@ function createMockState(overrides: ImportState = {}): MediaLibraryState & Media
     mediaItems: [],
     mediaById: {},
     isLoading: false,
+    loadingProjectId: null,
     importingIds: [],
     error: null,
     errorLink: null,

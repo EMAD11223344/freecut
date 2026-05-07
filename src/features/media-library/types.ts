@@ -57,6 +57,7 @@ export interface MediaLibraryState {
   mediaItems: MediaMetadata[]
   mediaById: Record<string, MediaMetadata>
   isLoading: boolean
+  loadingProjectId: string | null
   importingIds: string[] // IDs of media items currently being imported
   error: string | null
   errorLink: string | null

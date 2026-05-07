@@ -99,6 +99,7 @@ const newStore: MediaLibraryStoreApi =
         mediaItems: [],
         mediaById: {},
         isLoading: false, // Only load once a project context is available
+        loadingProjectId: null,
         importingIds: [],
         error: null,
         errorLink: null,
@@ -152,6 +153,7 @@ const newStore: MediaLibraryStoreApi =
             selectedMediaIds: [],
             selectedCompositionIds: [],
             isLoading: !!projectId, // Set loading if switching to a project
+            loadingProjectId: projectId,
             proxyStatus: new Map(),
             proxyProgress: new Map(),
             transcriptStatus: new Map(),
@@ -169,11 +171,11 @@ const newStore: MediaLibraryStoreApi =
 
           // Don't load without project context; ensure loading state is cleared.
           if (!currentProjectId) {
-            set({ isLoading: false })
+            set({ isLoading: false, loadingProjectId: null })
             return
           }
 
-          set({ isLoading: true, error: null })
+          set({ isLoading: true, loadingProjectId: currentProjectId, error: null })
 
           const opId = createOperationId()
           const event = logger.startEvent('loadMediaItems', opId)
@@ -183,15 +185,26 @@ const newStore: MediaLibraryStoreApi =
             // v3: Load project-scoped media only
             const mediaItems = await mediaLibraryService.getMediaForProject(currentProjectId)
 
+            if (get().currentProjectId !== currentProjectId) {
+              event.set('stale', true)
+              return
+            }
+
             set({
               mediaItems,
               mediaById: buildMediaById(mediaItems),
               isLoading: false,
+              loadingProjectId: null,
             })
 
             event.set('mediaCount', mediaItems.length)
 
             const transcriptStatus = await loadTranscriptStatusMap(mediaItems)
+            if (get().currentProjectId !== currentProjectId) {
+              event.set('staleTranscriptStatus', true)
+              return
+            }
+
             set({
               transcriptStatus,
               transcriptProgress: new Map(),
@@ -209,11 +222,18 @@ const newStore: MediaLibraryStoreApi =
               logger.warn('[MediaLibraryStore] Proxy initialization failed:', error)
             }
 
+            if (get().currentProjectId !== currentProjectId) {
+              event.set('staleProxyState', true)
+              return
+            }
+
             event.success({ mediaCount: mediaItems.length })
           } catch (error) {
             event.failure(error instanceof Error ? error : new Error(String(error)))
             const errorMessage = error instanceof Error ? error.message : 'Failed to load media'
-            set({ error: errorMessage, isLoading: false })
+            if (get().currentProjectId === currentProjectId) {
+              set({ error: errorMessage, isLoading: false, loadingProjectId: null })
+            }
             throw error
           }
         },

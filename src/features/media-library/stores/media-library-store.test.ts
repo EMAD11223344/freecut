@@ -123,6 +123,7 @@ function resetStore(): void {
     mediaItems: [],
     mediaById: {},
     isLoading: false,
+    loadingProjectId: null,
     importingIds: [],
     error: null,
     errorLink: null,
@@ -161,6 +162,7 @@ describe('useMediaLibraryStore', () => {
     await useMediaLibraryStore.getState().loadMediaItems()
 
     expect(useMediaLibraryStore.getState().isLoading).toBe(false)
+    expect(useMediaLibraryStore.getState().loadingProjectId).toBeNull()
     expect(mediaLibraryServiceMocks.getMediaForProject).not.toHaveBeenCalled()
   })
 
@@ -188,6 +190,7 @@ describe('useMediaLibraryStore', () => {
 
     const state = useMediaLibraryStore.getState()
     expect(state.isLoading).toBe(false)
+    expect(state.loadingProjectId).toBeNull()
     expect(state.mediaItems).toEqual([video, audio])
     expect(state.mediaById['video-1']).toEqual(video)
     expect(state.mediaById['audio-1']).toEqual(audio)
@@ -212,6 +215,51 @@ describe('useMediaLibraryStore', () => {
     expect(state.transcriptStatus.get('video-1')).toBe('idle')
     expect(proxyServiceMocks.loadExistingProxies).toHaveBeenCalledWith(['video-1'])
     expect(proxyServiceMocks.generateProxy).not.toHaveBeenCalled()
+  })
+
+  it('ignores stale media load completion after switching projects', async () => {
+    let resolveProjectOne!: (items: MediaMetadata[]) => void
+    const projectOnePromise = new Promise<MediaMetadata[]>((resolve) => {
+      resolveProjectOne = resolve
+    })
+    const projectTwoMedia = makeMedia({ id: 'project-2-media', fileName: 'project-2.mp4' })
+
+    mediaLibraryServiceMocks.getMediaForProject
+      .mockReturnValueOnce(projectOnePromise)
+      .mockResolvedValueOnce([projectTwoMedia])
+    indexedDbMocks.getTranscriptMediaIds.mockResolvedValue(new Set())
+    proxyServiceMocks.canGenerateProxy.mockReturnValue(false)
+
+    useMediaLibraryStore.setState({ currentProjectId: 'project-1' })
+    const projectOneLoad = useMediaLibraryStore.getState().loadMediaItems()
+    expect(useMediaLibraryStore.getState().loadingProjectId).toBe('project-1')
+
+    useMediaLibraryStore.getState().setCurrentProject('project-2')
+    const projectTwoLoad = useMediaLibraryStore.getState().loadMediaItems()
+
+    resolveProjectOne([makeMedia({ id: 'stale-project-1-media', fileName: 'project-1.mp4' })])
+    await Promise.all([projectOneLoad, projectTwoLoad])
+
+    const state = useMediaLibraryStore.getState()
+    expect(state.currentProjectId).toBe('project-2')
+    expect(state.isLoading).toBe(false)
+    expect(state.loadingProjectId).toBeNull()
+    expect(state.mediaItems).toEqual([projectTwoMedia])
+    expect(state.mediaById['stale-project-1-media']).toBeUndefined()
+  })
+
+  it('clears active project loading state when media load fails', async () => {
+    const error = new Error('load failed')
+    mediaLibraryServiceMocks.getMediaForProject.mockRejectedValue(error)
+
+    useMediaLibraryStore.setState({ currentProjectId: 'project-1' })
+    await expect(useMediaLibraryStore.getState().loadMediaItems()).rejects.toThrow(error)
+
+    const state = useMediaLibraryStore.getState()
+    expect(state.currentProjectId).toBe('project-1')
+    expect(state.isLoading).toBe(false)
+    expect(state.loadingProjectId).toBeNull()
+    expect(state.error).toBe('load failed')
   })
 
   it('clears proxy status and progress when proxy generation is cancelled', () => {

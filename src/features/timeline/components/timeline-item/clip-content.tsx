@@ -178,7 +178,12 @@ export const ClipContent = memo(function ClipContent({
   const timelineVisualsSettled = useTimelineSettingsStore(
     useCallback((s) => !s.isTimelineLoading, []),
   )
-  const mediaVisualsSettled = useMediaLibraryStore(useCallback((s) => !s.isLoading, []))
+  const mediaVisualsSettled = useMediaLibraryStore(
+    useCallback(
+      (s) => !s.isLoading || (s.loadingProjectId !== null && s.loadingProjectId !== s.currentProjectId),
+      [],
+    ),
+  )
   const shouldRenderHeavyVisuals = timelineVisualsSettled && mediaVisualsSettled
   const clipLeftPx = useMemo(
     () => (fps > 0 ? (clipLeftFrames / fps) * pixelsPerSecond : 0),
