@@ -53,12 +53,62 @@ import {
   mossTtsService,
   type MossTtsVoice,
 } from '@/features/editor/services/moss-tts-service'
+import {
+  SUPERTONIC_TTS_EXPRESSIVE_TAG_OPTIONS,
+  SUPERTONIC_TTS_LANGUAGE_OPTIONS,
+  SUPERTONIC_TTS_SUPPORTED_LANGUAGES,
+  SUPERTONIC_TTS_VOICE_OPTIONS,
+  supertonicTtsService,
+  type SupertonicTtsLanguageSelection,
+  type SupertonicTtsVoice,
+} from '@/features/editor/services/supertonic-tts-service'
 import { i18n } from '@/i18n'
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
   const s = Math.floor(seconds % 60)
   return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+function insertTextAtCursor({
+  input,
+  insertText,
+  setText,
+  text,
+}: {
+  input: HTMLTextAreaElement | null
+  insertText: string
+  setText: (value: string) => void
+  text: string
+}): void {
+  const start = input?.selectionStart ?? text.length
+  const end = input?.selectionEnd ?? start
+  const needsLeadingSpace = start > 0 && !/\s$/.test(text.slice(0, start))
+  const needsTrailingSpace = end < text.length && !/^\s/.test(text.slice(end))
+  const insertion = `${needsLeadingSpace ? ' ' : ''}${insertText}${needsTrailingSpace ? ' ' : ''}`
+  const nextText = `${text.slice(0, start)}${insertion}${text.slice(end)}`
+  setText(nextText)
+
+  window.requestAnimationFrame(() => {
+    input?.focus()
+    const cursor = start + insertion.length
+    input?.setSelectionRange(cursor, cursor)
+  })
+}
+
+function getLanguageDisplayName(
+  value: SupertonicTtsLanguageSelection,
+  fallback: string,
+  locale: string,
+  autoLabel: string,
+): string {
+  if (value === 'auto') return autoLabel
+
+  try {
+    return new Intl.DisplayNames([locale], { type: 'language' }).of(value) ?? fallback
+  } catch {
+    return fallback
+  }
 }
 
 /**
@@ -246,6 +296,9 @@ export const TtsGenerateDialog = memo(function TtsGenerateDialog() {
   const [engine, setEngine] = useState<StoredTtsEngine>(() => getStoredTtsEngine())
   const [kokoroVoice, setKokoroVoice] = useState<KokoroTtsVoice>('af_heart')
   const [mossVoice, setMossVoice] = useState<MossTtsVoice>('Xiaoyu')
+  const [supertonicVoice, setSupertonicVoice] = useState<SupertonicTtsVoice>('M3')
+  const [supertonicLanguage, setSupertonicLanguage] =
+    useState<SupertonicTtsLanguageSelection>('auto')
   const model: KokoroTtsModel = KOKORO_TTS_BEST_MODEL
   const [speed, setSpeed] = useState(1)
   const [isGenerating, setIsGenerating] = useState(false)
@@ -256,6 +309,7 @@ export const TtsGenerateDialog = memo(function TtsGenerateDialog() {
   const [inserted, setInserted] = useState(false)
 
   const resultUrlRef = useRef<string | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const sessionIdRef = useRef(0)
   const insertedRef = useRef(inserted)
   insertedRef.current = inserted
@@ -295,12 +349,26 @@ export const TtsGenerateDialog = memo(function TtsGenerateDialog() {
 
   const isKokoroSupported = kokoroTtsService.isSupported()
   const isMossSupported = mossTtsService.isSupported()
-  const supportsNativeSpeed = engine === 'kokoro'
+  const isSupertonicSupported = supertonicTtsService.isSupported()
+  const supportsNativeSpeed = engine === 'kokoro' || engine === 'supertonic'
+  const speedMin = engine === 'supertonic' ? 0.8 : 0.5
+  const speedMax = engine === 'supertonic' ? 1.3 : 2
+
+  useEffect(() => {
+    setSpeed((current) => Math.min(speedMax, Math.max(speedMin, current)))
+  }, [speedMax, speedMin])
+
   const effectiveSpeed = supportsNativeSpeed ? speed : 1
-  const isTtsSupported = engine === 'kokoro' ? isKokoroSupported : isMossSupported
+  const isTtsSupported =
+    engine === 'kokoro'
+      ? isKokoroSupported
+      : engine === 'moss'
+        ? isMossSupported
+        : isSupertonicSupported
   const trimmedText = text.trim()
-  const voice = engine === 'kokoro' ? kokoroVoice : mossVoice
+  const voice = engine === 'kokoro' ? kokoroVoice : engine === 'moss' ? mossVoice : supertonicVoice
   const mossLanguagesLabel = MOSS_TTS_SUPPORTED_LANGUAGES.join(', ')
+  const supertonicLanguagesLabel = SUPERTONIC_TTS_SUPPORTED_LANGUAGES.join(', ')
 
   const handleGenerate = useCallback(async () => {
     if (!currentProjectId) {
@@ -315,7 +383,12 @@ export const TtsGenerateDialog = memo(function TtsGenerateDialog() {
       setError(
         engine === 'kokoro'
           ? t('editor.tts.errors.kokoroUnsupported')
-          : t('editor.tts.errors.mossUnsupported'),
+          : engine === 'moss'
+            ? t('editor.tts.errors.mossUnsupported')
+            : t('editor.tts.errors.supertonicUnsupported', {
+                defaultValue:
+                  'This browser cannot run the local Supertonic TTS runtime. Try a recent Chrome or Edge browser.',
+              }),
       )
       return
     }
@@ -335,6 +408,9 @@ export const TtsGenerateDialog = memo(function TtsGenerateDialog() {
     const thisSession = sessionIdRef.current
 
     try {
+      const onProgress = (msg: string) => {
+        if (sessionIdRef.current === thisSession) setProgress(msg)
+      }
       const result =
         engine === 'kokoro'
           ? await kokoroTtsService.generateSpeechFile({
@@ -342,18 +418,22 @@ export const TtsGenerateDialog = memo(function TtsGenerateDialog() {
               voice: kokoroVoice,
               speed: effectiveSpeed,
               model,
-              onProgress: (msg) => {
-                if (sessionIdRef.current === thisSession) setProgress(msg)
-              },
+              onProgress,
             })
-          : await mossTtsService.generateSpeechFile({
-              text: trimmedText,
-              voice: mossVoice,
-              speed: effectiveSpeed,
-              onProgress: (msg) => {
-                if (sessionIdRef.current === thisSession) setProgress(msg)
-              },
-            })
+          : engine === 'moss'
+            ? await mossTtsService.generateSpeechFile({
+                text: trimmedText,
+                voice: mossVoice,
+                speed: effectiveSpeed,
+                onProgress,
+              })
+            : await supertonicTtsService.generateSpeechFile({
+                text: trimmedText,
+                voice: supertonicVoice,
+                language: supertonicLanguage,
+                speed: effectiveSpeed,
+                onProgress,
+              })
 
       const { blob, file, duration } = result
 
@@ -369,8 +449,12 @@ export const TtsGenerateDialog = memo(function TtsGenerateDialog() {
         engine === 'kokoro'
           ? (KOKORO_TTS_VOICE_OPTIONS.find((option) => option.value === kokoroVoice)?.label ??
             kokoroVoice)
-          : getMossTtsVoiceOption(mossVoice).label
-      const modelLabel = engine === 'kokoro' ? 'Best' : 'Multilingual Nano'
+          : engine === 'moss'
+            ? getMossTtsVoiceOption(mossVoice).label
+            : (SUPERTONIC_TTS_VOICE_OPTIONS.find((option) => option.value === supertonicVoice)
+                ?.label ?? supertonicVoice)
+      const modelLabel =
+        engine === 'kokoro' ? 'Best' : engine === 'moss' ? 'Multilingual Nano' : 'Supertonic 3'
       const tags =
         engine === 'kokoro'
           ? [
@@ -380,7 +464,14 @@ export const TtsGenerateDialog = memo(function TtsGenerateDialog() {
               `kokoro-quality:${model}`,
               `kokoro-voice:${kokoroVoice}`,
             ]
-          : ['ai-generated', 'moss-tts', 'tts-engine:moss', `moss-voice:${mossVoice}`]
+          : engine === 'moss'
+            ? ['ai-generated', 'moss-tts', 'tts-engine:moss', `moss-voice:${mossVoice}`]
+            : [
+                'ai-generated',
+                'supertonic-tts',
+                'tts-engine:supertonic',
+                `supertonic-voice:${supertonicVoice}`,
+              ]
 
       setResult({ file, objectUrl, duration, voice: voiceLabel, model: modelLabel, tags })
       setProgress(null)
@@ -406,6 +497,8 @@ export const TtsGenerateDialog = memo(function TtsGenerateDialog() {
     kokoroVoice,
     model,
     mossVoice,
+    supertonicLanguage,
+    supertonicVoice,
     trimmedText,
     t,
   ])
@@ -479,7 +572,12 @@ export const TtsGenerateDialog = memo(function TtsGenerateDialog() {
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-100">
               {engine === 'kokoro'
                 ? t('editor.tts.kokoroUnsupported')
-                : t('editor.tts.mossUnsupported')}
+                : engine === 'moss'
+                  ? t('editor.tts.mossUnsupported')
+                  : t('editor.tts.supertonicUnsupported', {
+                      defaultValue:
+                        'This browser cannot run the local Supertonic TTS runtime. Try a recent Chrome or Edge browser.',
+                    })}
             </div>
           )}
 
@@ -510,6 +608,14 @@ export const TtsGenerateDialog = memo(function TtsGenerateDialog() {
                         {t('editor.tts.supportedLanguages', { languages: mossLanguagesLabel })}
                       </p>
                     </div>
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium">Supertonic 3</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {t('editor.tts.supportedLanguages', {
+                          languages: supertonicLanguagesLabel,
+                        })}
+                      </p>
+                    </div>
                   </PopoverContent>
                 </Popover>
               </div>
@@ -528,6 +634,11 @@ export const TtsGenerateDialog = memo(function TtsGenerateDialog() {
                   <SelectItem value="moss" className="text-xs">
                     {t('editor.tts.mossOption')}
                   </SelectItem>
+                  <SelectItem value="supertonic" className="text-xs">
+                    {t('editor.tts.supertonicOption', {
+                      defaultValue: 'Supertonic 3 (31 languages, local ONNX)',
+                    })}
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -540,8 +651,10 @@ export const TtsGenerateDialog = memo(function TtsGenerateDialog() {
                   onValueChange={(value) => {
                     if (engine === 'kokoro') {
                       setKokoroVoice(value as KokoroTtsVoice)
-                    } else {
+                    } else if (engine === 'moss') {
                       setMossVoice(value as MossTtsVoice)
+                    } else {
+                      setSupertonicVoice(value as SupertonicTtsVoice)
                     }
                   }}
                   disabled={isGenerating || isInserting}
@@ -550,16 +663,47 @@ export const TtsGenerateDialog = memo(function TtsGenerateDialog() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="max-h-72">
-                    {(engine === 'kokoro' ? KOKORO_TTS_VOICE_OPTIONS : MOSS_TTS_VOICE_OPTIONS).map(
-                      (option) => (
-                        <SelectItem key={option.value} value={option.value} className="text-xs">
-                          {option.label}
-                        </SelectItem>
-                      ),
-                    )}
+                    {(engine === 'kokoro'
+                      ? KOKORO_TTS_VOICE_OPTIONS
+                      : engine === 'moss'
+                        ? MOSS_TTS_VOICE_OPTIONS
+                        : SUPERTONIC_TTS_VOICE_OPTIONS
+                    ).map((option) => (
+                      <SelectItem key={option.value} value={option.value} className="text-xs">
+                        {option.label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
+              {engine === 'supertonic' && (
+                <div className="space-y-1.5">
+                  <Label>{t('editor.tts.language', { defaultValue: 'Language' })}</Label>
+                  <Select
+                    value={supertonicLanguage}
+                    onValueChange={(value) =>
+                      setSupertonicLanguage(value as SupertonicTtsLanguageSelection)
+                    }
+                    disabled={isGenerating || isInserting}
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-72">
+                      {SUPERTONIC_TTS_LANGUAGE_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value} className="text-xs">
+                          {getLanguageDisplayName(
+                            option.value,
+                            option.label,
+                            i18n.language,
+                            t('editor.tts.autoDetectLanguage', { defaultValue: 'Auto detect' }),
+                          )}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
           </div>
 
@@ -567,6 +711,7 @@ export const TtsGenerateDialog = memo(function TtsGenerateDialog() {
           <div className="space-y-2">
             <Label htmlFor="tts-dialog-text">{t('editor.tts.text')}</Label>
             <Textarea
+              ref={textareaRef}
               id="tts-dialog-text"
               value={text}
               onChange={(event) => setText(event.target.value)}
@@ -574,6 +719,33 @@ export const TtsGenerateDialog = memo(function TtsGenerateDialog() {
               className="min-h-28 resize-y bg-secondary/30 text-sm"
               disabled={isGenerating || isInserting}
             />
+            {engine === 'supertonic' && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] text-muted-foreground">
+                  {t('editor.tts.expressiveTags', { defaultValue: 'Expressive tags' })}
+                </span>
+                {SUPERTONIC_TTS_EXPRESSIVE_TAG_OPTIONS.map((tag) => (
+                  <Button
+                    key={tag.value}
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={() =>
+                      insertTextAtCursor({
+                        input: textareaRef.current,
+                        insertText: tag.value,
+                        setText,
+                        text,
+                      })
+                    }
+                    disabled={isGenerating || isInserting}
+                  >
+                    {tag.label}
+                  </Button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Speed */}
@@ -582,8 +754,8 @@ export const TtsGenerateDialog = memo(function TtsGenerateDialog() {
               label={t('editor.tts.speed')}
               value={speed}
               onChange={setSpeed}
-              min={0.5}
-              max={2}
+              min={speedMin}
+              max={speedMax}
               step={0.05}
               unit="x"
               disabled={isGenerating || isInserting}
