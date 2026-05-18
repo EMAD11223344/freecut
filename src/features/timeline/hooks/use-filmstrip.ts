@@ -131,9 +131,11 @@ export function useFilmstrip({
     return normalized.length > 0 ? normalized : undefined
   }, [targetFrameIndices])
 
-  // Subscribe to progressive updates
+  // Subscribe to progressive updates. Intentionally does not require blobUrl —
+  // cached filmstrip frames live on disk and can be displayed before the source
+  // video blob URL resolves.
   useEffect(() => {
-    if (!enabled || !blobUrl || !duration || duration <= 0) {
+    if (!enabled || !duration || duration <= 0) {
       return
     }
 
@@ -144,7 +146,21 @@ export function useFilmstrip({
     })
 
     return unsubscribe
-  }, [mediaId, enabled, blobUrl, duration])
+  }, [mediaId, enabled, duration])
+
+  // Hydrate from persisted storage as soon as the clip is visible — does not
+  // wait for the source blob URL. For warm-disk / cold-memory clips this is
+  // typically all we need; the extraction effect below will then no-op when
+  // it finds a complete cache.
+  useEffect(() => {
+    if (!enabled || !duration || duration <= 0) return
+    if (!isVisible) return
+    if (filmstrip?.isComplete) return
+
+    void filmstripCache.loadFromDisk(mediaId, duration).catch(() => {
+      // Swallow: extraction path below is the fallback once blobUrl arrives.
+    })
+  }, [mediaId, enabled, duration, isVisible, filmstrip?.isComplete])
 
   // Once a clip leaves the active workset, stop spending background decode time on it.
   useEffect(() => {

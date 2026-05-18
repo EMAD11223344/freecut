@@ -2359,6 +2359,73 @@ class FilmstripCacheService {
   }
 
   /**
+   * Hydrate from persisted storage without starting extraction.
+   *
+   * Filmstrip display does not need the source video blob URL — JPEGs on disk
+   * are enough. This lets a clip show its cached frames before useMediaBlobUrl
+   * resolves the source, which otherwise serializes (visibility → blobUrl →
+   * filmstrip) and adds 50-200ms+ to re-display.
+   */
+  async loadFromDisk(mediaId: string, duration: number): Promise<Filmstrip | null> {
+    if (duration <= 0) return null
+
+    const cached = this.cache.get(mediaId)
+    if (cached?.isComplete) {
+      this.touchCacheEntry(mediaId)
+      return cached
+    }
+
+    const inflight = this.loadingPromises.get(mediaId)
+    if (inflight) {
+      return inflight
+    }
+
+    const promise = (async (): Promise<Filmstrip> => {
+      const stored = await filmstripStorage.load(mediaId)
+      if (!stored) {
+        // Return whatever's in memory (possibly nothing) — caller will fall
+        // back to the extraction path once blobUrl is available.
+        return (
+          this.cache.get(mediaId) ?? {
+            frames: [],
+            isComplete: false,
+            isExtracting: false,
+            progress: 0,
+          }
+        )
+      }
+
+      const totalFrames = Math.ceil(duration * FRAME_RATE)
+      const targetIndices = this.buildTargetIndices(totalFrames, null)
+      const targetSet = new Set(targetIndices)
+      const existingTargetCount = stored.frames.reduce(
+        (count, frame) => (targetSet.has(frame.index) ? count + 1 : count),
+        0,
+      )
+
+      const filmstrip: Filmstrip = {
+        frames: stored.frames,
+        isComplete: stored.metadata.isComplete,
+        isExtracting: false,
+        progress: stored.metadata.isComplete
+          ? 100
+          : targetIndices.length > 0
+            ? Math.round((existingTargetCount / targetIndices.length) * 100)
+            : 0,
+      }
+      this.notifyUpdate(mediaId, filmstrip)
+      return filmstrip
+    })()
+
+    this.loadingPromises.set(mediaId, promise)
+    try {
+      return await promise
+    } finally {
+      this.loadingPromises.delete(mediaId)
+    }
+  }
+
+  /**
    * Refresh cached frame URLs from persisted storage when a visible tile reports a stale source.
    */
   async refreshFrames(mediaId: string, frameIndices: number[]): Promise<void> {

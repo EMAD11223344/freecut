@@ -476,13 +476,15 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
     }
   }, [mediaId, isVisible, proxyBlobUrl, blobUrlVersion, hasStartedLoadingRef, setBlobUrl])
 
-  // Use filmstrip hook
+  // Use filmstrip hook. `enabled` no longer requires the source blob URL —
+  // disk-cached frames can render before useMediaBlobUrl resolves. The
+  // extraction path inside the hook still gates on blobUrl.
   const { frames, isLoading, isComplete, error } = useFilmstrip({
     mediaId,
     blobUrl: filmstripSourceUrl,
     duration: sourceDuration,
     isVisible,
-    enabled: !!filmstripSourceUrl && sourceDuration > 0,
+    enabled: sourceDuration > 0,
     priorityWindow,
     targetFrameCount,
     targetFrameIndices,

@@ -258,30 +258,38 @@ class FilmstripStorage {
       if (!metadata) return null
 
       const entries = await listDirectory(requireWorkspaceRoot(), filmstripDir(mediaId))
-      const frameFilesByIndex = new Map<number, { blob: Blob; ext: string }>()
 
+      // Pick the best file per index up front (prefer primary ext when both exist),
+      // then issue all blob reads concurrently. Sequential awaits used to dominate
+      // re-display latency for cached clips — O(N) wall time at ~1-5ms per frame.
+      const fileByIndex = new Map<number, { name: string; index: number; ext: string }>()
       for (const entry of entries) {
         if (entry.kind !== 'file') continue
         const parsed = parseFrameFileNameParts(entry.name)
         if (!parsed) continue
-
-        const blob = await readBlob(
-          requireWorkspaceRoot(),
-          filmstripFramePath(mediaId, parsed.index, parsed.ext),
-        )
-        if (!blob || blob.size <= 0) continue
-
-        const existing = frameFilesByIndex.get(parsed.index)
+        const existing = fileByIndex.get(parsed.index)
         const shouldReplace =
           !existing || (parsed.ext === PRIMARY_FRAME_EXT && existing.ext !== PRIMARY_FRAME_EXT)
         if (shouldReplace) {
-          frameFilesByIndex.set(parsed.index, { blob, ext: parsed.ext })
+          fileByIndex.set(parsed.index, { name: entry.name, index: parsed.index, ext: parsed.ext })
         }
       }
 
-      const frameFiles = Array.from(frameFilesByIndex.entries())
-        .map(([index, value]) => ({ index, blob: value.blob }))
-        .sort((a, b) => a.index - b.index)
+      const candidates = Array.from(fileByIndex.values()).sort((a, b) => a.index - b.index)
+      const readResults = await Promise.all(
+        candidates.map(async ({ index, ext }) => {
+          const blob = await readBlob(
+            requireWorkspaceRoot(),
+            filmstripFramePath(mediaId, index, ext),
+          )
+          return blob && blob.size > 0 ? { index, blob } : null
+        }),
+      )
+
+      const frameFiles: Array<{ index: number; blob: Blob }> = []
+      for (const result of readResults) {
+        if (result) frameFiles.push(result)
+      }
 
       const nextUrls: Array<{ index: number; url: string }> = []
       const frames: FilmstripFrame[] = frameFiles.map(({ index, blob }) => {
