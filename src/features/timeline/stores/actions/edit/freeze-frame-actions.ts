@@ -169,9 +169,7 @@ export async function insertFreezeFrame(itemId: string, playheadFrame: number): 
     mediaMetadata.thumbnailId = thumbnailId
 
     // Add to media library store
-    useMediaLibraryStore.setState((state) => ({
-      mediaItems: [mediaMetadata, ...state.mediaItems],
-    }))
+    useMediaLibraryStore.getState().prependMediaItem(mediaMetadata)
 
     // Step 4: Perform timeline mutations atomically (split + insert + shift)
     const freezeDurationFrames = Math.round(fps * 2) // 2 seconds
