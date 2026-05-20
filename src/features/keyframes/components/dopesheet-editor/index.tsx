@@ -3,17 +3,7 @@
  * Shows keyframes across properties as draggable diamonds on a frame grid.
  */
 
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
-  type ReactNode,
-} from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useHotkeys } from 'react-hotkeys-hook'
@@ -61,7 +51,42 @@ import type { BlockedFrameRange } from '../../utils/transition-region'
 import { HOTKEY_OPTIONS } from '@/config/hotkeys'
 import { getFrameAxisX, getFrameFromAxisX, getVisibleKeyframeX } from './layout'
 import { CompactNavigator } from './compact-navigator'
+import { InterpolationTypeIcon } from './interpolation-type-icon'
 import { KeyframeTimingStrip } from './keyframe-timing-strip'
+import { MiniZoomControl } from './mini-zoom-control'
+import { setPointerCaptureSafely } from './dopesheet-utils'
+import {
+  arePreviewFramesEqual,
+  buildGroupedPropertyRows,
+  getNiceTickStep,
+} from './dopesheet-helpers'
+import { loadGraphVisibleProperties, saveGraphVisibleProperties } from './graph-visibility-storage'
+import {
+  DRAG_THRESHOLD,
+  EMPTY_AUTO_KEY_ENABLED_BY_PROPERTY,
+  GROUP_HEADER_HEIGHT,
+  MARQUEE_SCROLL_EDGE_PX,
+  MARQUEE_SCROLL_MAX_SPEED,
+  MINI_ICON_BUTTON_CLASS,
+  MINI_ICON_CLASS,
+  MIN_VISIBLE_FRAMES,
+  PROPERTY_COLUMN_WIDTH,
+  ROW_HEIGHT,
+  RULER_HEIGHT,
+  SNAP_THRESHOLD_PX,
+  ZOOM_IN_FACTOR,
+  ZOOM_OUT_FACTOR,
+} from './dopesheet-constants'
+import type {
+  DopesheetPropertyGroup,
+  DopesheetPropertyRow,
+  DragState,
+  KeyframeMeta,
+  MarqueeMode,
+  MarqueeState,
+  RenderedSheetEntry,
+  Viewport,
+} from './dopesheet-types'
 import { normalizeKeyframeNavigatorViewport } from './compact-navigator-utils'
 import { getDopesheetRowControlState } from './row-controls'
 import { getPropertyAccordionGroups } from './property-groups'
@@ -182,505 +207,6 @@ interface DopesheetEditorProps {
   visualizationMode?: 'dopesheet' | 'graph'
   /** Additional class name */
   className?: string
-}
-
-interface Viewport {
-  startFrame: number
-  endFrame: number
-}
-
-interface KeyframeMeta {
-  property: AnimatableProperty
-  keyframe: Keyframe
-}
-
-interface DopesheetPropertyRow {
-  property: AnimatableProperty
-  keyframes: Keyframe[]
-  controls: ReturnType<typeof getDopesheetRowControlState>
-}
-
-interface DopesheetPropertyGroup {
-  id: string
-  label: string
-  rows: DopesheetPropertyRow[]
-  frameGroups: Array<{
-    frame: number
-    keyframes: Array<{ property: AnimatableProperty; keyframe: Keyframe }>
-  }>
-  currentKeyframes: Array<{ property: AnimatableProperty; keyframe: Keyframe }>
-  hasKeyframeAtCurrentFrame: boolean
-  prevKeyframe: { property: AnimatableProperty; keyframe: Keyframe } | null
-  nextKeyframe: { property: AnimatableProperty; keyframe: Keyframe } | null
-}
-
-type RenderedSheetEntry =
-  | { type: 'group'; group: DopesheetPropertyGroup; top: number }
-  | { type: 'row'; row: DopesheetPropertyRow; top: number }
-
-interface DragState {
-  anchorKeyframeId: string
-  selectedKeyframeIds: string[]
-  initialFrames: Map<string, number>
-  startClientX: number
-  pointerId: number
-  started: boolean
-  duplicateOnCommit: boolean
-}
-
-type MarqueeMode = 'replace' | 'add' | 'toggle'
-
-interface MarqueeState {
-  pointerId: number
-  startX: number
-  startY: number
-  currentX: number
-  currentY: number
-  mode: MarqueeMode
-  baseSelection: Set<string>
-  started: boolean
-}
-
-const PROPERTY_COLUMN_WIDTH = 248
-const MIN_VISIBLE_FRAMES = 20
-const SNAP_THRESHOLD_PX = 8
-const GROUP_HEADER_HEIGHT = 22
-const ROW_HEIGHT = 30
-const RULER_HEIGHT = 22
-const ZOOM_IN_FACTOR = 0.8
-const ZOOM_OUT_FACTOR = 1.25
-const DRAG_THRESHOLD = 2
-const MARQUEE_SCROLL_EDGE_PX = 24
-const MARQUEE_SCROLL_MAX_SPEED = 16
-const EMPTY_AUTO_KEY_ENABLED_BY_PROPERTY: Partial<Record<AnimatableProperty, boolean>> = {}
-const MINI_ICON_BUTTON_CLASS = 'h-4 w-4 flex-shrink-0 rounded-sm p-0 leading-none'
-const MINI_ICON_CLASS = 'h-[8px] w-[8px]'
-const GRAPH_VISIBLE_PROPERTIES_STORAGE_KEY = 'timeline:keyframeGraphVisibleProperties'
-
-function InterpolationTypeIcon({ type }: { type: EasingType }) {
-  const iconProps = {
-    width: 16,
-    height: 16,
-    viewBox: '0 0 16 16',
-    fill: 'none',
-  }
-
-  const curveProps = {
-    stroke: 'currentColor',
-    strokeWidth: 0.88,
-    strokeLinecap: 'round' as const,
-    strokeLinejoin: 'round' as const,
-  }
-
-  const guideProps = {
-    ...curveProps,
-    strokeWidth: 0.66,
-    opacity: 0.5,
-  }
-
-  const start = { x: 2.1, y: 11.9 }
-  const end = { x: 13.9, y: 4.1 }
-
-  const toScreenPoint = (x: number, y: number) => ({
-    x: start.x + (end.x - start.x) * x,
-    y: start.y - (start.y - end.y) * y,
-  })
-
-  const formatPoint = (point: { x: number; y: number }) =>
-    `${point.x.toFixed(2)} ${point.y.toFixed(2)}`
-  const getDistance = (a: { x: number; y: number }, b: { x: number; y: number }) =>
-    Math.hypot(a.x - b.x, a.y - b.y)
-
-  const renderControlHandle = (
-    anchor: { x: number; y: number },
-    control: { x: number; y: number },
-    key: string,
-  ) => {
-    if (getDistance(anchor, control) < 0.9) {
-      return null
-    }
-
-    return (
-      <g key={key}>
-        <path d={`M${formatPoint(anchor)}L${formatPoint(control)}`} {...guideProps} />
-        <circle
-          cx={control.x}
-          cy={control.y}
-          r="0.56"
-          fill="currentColor"
-          stroke="none"
-          opacity="0.68"
-        />
-      </g>
-    )
-  }
-
-  const renderBezier = (x1: number, y1: number, x2: number, y2: number) => {
-    const controlOne = toScreenPoint(x1, y1)
-    const controlTwo = toScreenPoint(x2, y2)
-
-    return (
-      <>
-        {renderControlHandle(start, controlOne, 'control-one')}
-        {renderControlHandle(end, controlTwo, 'control-two')}
-        <path
-          d={`M${formatPoint(start)}C${formatPoint(controlOne)} ${formatPoint(controlTwo)} ${formatPoint(end)}`}
-          {...curveProps}
-        />
-      </>
-    )
-  }
-
-  const iconContent = (() => {
-    if (type === 'linear') {
-      return <path d={`M${formatPoint(start)}L${formatPoint(end)}`} {...curveProps} />
-    }
-
-    if (type === 'hold') {
-      const step = toScreenPoint(1, 0)
-      return (
-        <path
-          d={`M${formatPoint(start)}L${formatPoint(step)}L${formatPoint(end)}`}
-          {...curveProps}
-        />
-      )
-    }
-
-    if (type === 'ease-in') {
-      return renderBezier(0.42, 0, 1, 1)
-    }
-
-    if (type === 'ease-out') {
-      return renderBezier(0, 0, 0.58, 1)
-    }
-
-    if (type === 'ease-in-out') {
-      return renderBezier(0.42, 0, 0.58, 1)
-    }
-
-    if (type === 'cubic-bezier') {
-      return renderBezier(0.2, 0.1, 0.74, 0.88)
-    }
-
-    const springOne = toScreenPoint(0.24, 0.02)
-    const springTwo = toScreenPoint(0.36, 0.58)
-    const springMid = toScreenPoint(0.52, 0.58)
-    const springThree = toScreenPoint(0.68, 0.58)
-    const springFour = toScreenPoint(0.8, 1.08)
-    const springSettle = toScreenPoint(0.9, 0.98)
-    const springFive = toScreenPoint(0.98, 1)
-
-    return (
-      <>
-        {renderControlHandle(start, springOne, 'spring-control-one')}
-        {renderControlHandle(end, springFive, 'spring-control-two')}
-        <path
-          d={[
-            `M${formatPoint(start)}`,
-            `C${formatPoint(springOne)} ${formatPoint(springTwo)} ${formatPoint(springMid)}`,
-            `C${formatPoint(springThree)} ${formatPoint(springFour)} ${formatPoint(springSettle)}`,
-            `C${formatPoint(springSettle)} ${formatPoint(springFive)} ${formatPoint(end)}`,
-          ].join(' ')}
-          {...curveProps}
-        />
-      </>
-    )
-  })()
-
-  return (
-    <svg aria-hidden="true" {...iconProps}>
-      {iconContent}
-      <circle cx={start.x} cy={start.y} r="0.74" fill="currentColor" stroke="none" />
-      <circle cx={end.x} cy={end.y} r="0.74" fill="currentColor" stroke="none" />
-    </svg>
-  )
-}
-
-function getNiceTickStep(frameRange: number): number {
-  const rough = Math.max(1, frameRange / 10)
-  const magnitude = Math.pow(10, Math.floor(Math.log10(rough)))
-  const normalized = rough / magnitude
-  if (normalized <= 1) return magnitude
-  if (normalized <= 2) return 2 * magnitude
-  if (normalized <= 5) return 5 * magnitude
-  return 10 * magnitude
-}
-
-function arePreviewFramesEqual(
-  a: Record<string, number> | null,
-  b: Record<string, number> | null,
-): boolean {
-  if (a === b) return true
-  if (!a || !b) return a === b
-
-  const aKeys = Object.keys(a)
-  const bKeys = Object.keys(b)
-  if (aKeys.length !== bKeys.length) return false
-
-  for (const key of aKeys) {
-    if (a[key] !== b[key]) return false
-  }
-
-  return true
-}
-
-function buildGroupedPropertyRows(
-  rows: DopesheetPropertyRow[],
-  currentFrame: number,
-): DopesheetPropertyGroup[] {
-  const rowByProperty = new Map<AnimatableProperty, DopesheetPropertyRow>(
-    rows.map((row) => [row.property, row]),
-  )
-
-  return getPropertyAccordionGroups(rows.map((row) => row.property))
-    .map((group) => {
-      const groupedRows = group.properties.flatMap((property) => {
-        const row = rowByProperty.get(property)
-        return row ? [row] : []
-      })
-      const keyframeEntries = groupedRows
-        .flatMap((row) => row.keyframes.map((keyframe) => ({ property: row.property, keyframe })))
-        .toSorted((a, b) => a.keyframe.frame - b.keyframe.frame)
-      const frameGroups = keyframeEntries.reduce<
-        Array<{
-          frame: number
-          keyframes: Array<{ property: AnimatableProperty; keyframe: Keyframe }>
-        }>
-      >((groups, entry) => {
-        const lastGroup = groups.at(-1)
-        if (lastGroup && lastGroup.frame === entry.keyframe.frame) {
-          lastGroup.keyframes.push(entry)
-        } else {
-          groups.push({
-            frame: entry.keyframe.frame,
-            keyframes: [entry],
-          })
-        }
-        return groups
-      }, [])
-      const currentKeyframes =
-        frameGroups.find((groupEntries) => groupEntries.frame === currentFrame)?.keyframes ?? []
-
-      let prevKeyframe: { property: AnimatableProperty; keyframe: Keyframe } | null = null
-      let nextKeyframe: { property: AnimatableProperty; keyframe: Keyframe } | null = null
-
-      for (let index = frameGroups.length - 1; index >= 0; index -= 1) {
-        const frameGroup = frameGroups[index]
-        if (frameGroup && frameGroup.frame < currentFrame) {
-          prevKeyframe = frameGroup.keyframes[0] ?? null
-          break
-        }
-      }
-
-      for (const frameGroup of frameGroups) {
-        if (frameGroup.frame > currentFrame) {
-          nextKeyframe = frameGroup.keyframes[0] ?? null
-          break
-        }
-      }
-
-      return {
-        id: group.id,
-        label: group.label,
-        rows: groupedRows,
-        frameGroups,
-        currentKeyframes,
-        hasKeyframeAtCurrentFrame: currentKeyframes.length > 0,
-        prevKeyframe,
-        nextKeyframe,
-      }
-    })
-    .filter((group) => group.rows.length > 0)
-}
-
-function getDefaultGraphVisibleProperties(
-  properties: AnimatableProperty[],
-  selectedProperty: AnimatableProperty | null | undefined,
-): Set<AnimatableProperty> {
-  if (selectedProperty && properties.includes(selectedProperty)) {
-    return new Set([selectedProperty])
-  }
-
-  const firstProperty = properties[0]
-  return firstProperty ? new Set([firstProperty]) : new Set()
-}
-
-function loadGraphVisibleProperties(
-  itemId: string,
-  properties: AnimatableProperty[],
-  selectedProperty: AnimatableProperty | null | undefined,
-): Set<AnimatableProperty> {
-  const fallback = getDefaultGraphVisibleProperties(properties, selectedProperty)
-
-  try {
-    const raw = localStorage.getItem(`${GRAPH_VISIBLE_PROPERTIES_STORAGE_KEY}:${itemId}`)
-    if (!raw) {
-      return fallback
-    }
-
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) {
-      return fallback
-    }
-
-    const normalized = parsed.filter(
-      (property): property is AnimatableProperty =>
-        typeof property === 'string' && properties.includes(property as AnimatableProperty),
-    )
-
-    if (parsed.length === 0) {
-      return new Set()
-    }
-
-    return normalized.length > 0 ? new Set(normalized) : fallback
-  } catch {
-    return fallback
-  }
-}
-
-function saveGraphVisibleProperties(itemId: string, properties: Set<AnimatableProperty>) {
-  try {
-    localStorage.setItem(
-      `${GRAPH_VISIBLE_PROPERTIES_STORAGE_KEY}:${itemId}`,
-      JSON.stringify([...properties]),
-    )
-  } catch {
-    // ignore localStorage write errors
-  }
-}
-
-function clampZoomValue(value: number): number {
-  return Math.max(0, Math.min(100, value))
-}
-
-function setPointerCaptureSafely(target: EventTarget | null, pointerId: number) {
-  if (target && 'setPointerCapture' in target && typeof target.setPointerCapture === 'function') {
-    target.setPointerCapture(pointerId)
-  }
-}
-
-interface MiniZoomControlProps {
-  icon: ReactNode
-  label: string
-  value: number
-  disabled?: boolean
-  onValueChange: (value: number) => void
-  onReset?: () => void
-}
-
-function MiniZoomControl({
-  icon,
-  label,
-  value,
-  disabled = false,
-  onValueChange,
-  onReset,
-}: MiniZoomControlProps) {
-  const trackRef = useRef<HTMLButtonElement | null>(null)
-
-  const updateValueFromClientX = useCallback(
-    (clientX: number) => {
-      const track = trackRef.current
-      if (!track) {
-        return
-      }
-
-      const rect = track.getBoundingClientRect()
-      const horizontalPadding = 4
-      const usableWidth = Math.max(1, rect.width - horizontalPadding * 2)
-      const nextValue = ((clientX - rect.left - horizontalPadding) / usableWidth) * 100
-      onValueChange(clampZoomValue(nextValue))
-    },
-    [onValueChange],
-  )
-
-  const handlePointerDown = useCallback(
-    (event: ReactPointerEvent<HTMLButtonElement>) => {
-      if (disabled || event.button !== 0) {
-        return
-      }
-
-      event.preventDefault()
-      setPointerCaptureSafely(event.currentTarget, event.pointerId)
-      updateValueFromClientX(event.clientX)
-    },
-    [disabled, updateValueFromClientX],
-  )
-
-  const handlePointerMove = useCallback(
-    (event: ReactPointerEvent<HTMLButtonElement>) => {
-      if (disabled || !event.currentTarget.hasPointerCapture(event.pointerId)) {
-        return
-      }
-
-      updateValueFromClientX(event.clientX)
-    },
-    [disabled, updateValueFromClientX],
-  )
-
-  const handlePointerRelease = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId)
-    }
-  }, [])
-
-  const handleKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLButtonElement>) => {
-      if (disabled) {
-        return
-      }
-
-      if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
-        event.preventDefault()
-        onValueChange(clampZoomValue(value - 5))
-      } else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
-        event.preventDefault()
-        onValueChange(clampZoomValue(value + 5))
-      } else if (event.key === 'Home') {
-        event.preventDefault()
-        onValueChange(0)
-      } else if (event.key === 'End') {
-        event.preventDefault()
-        onValueChange(100)
-      }
-    },
-    [disabled, onValueChange, value],
-  )
-
-  const thumbLeft = `calc(4px + ${(clampZoomValue(value) / 100).toFixed(4)} * (100% - 8px))`
-
-  return (
-    <div className="flex items-center gap-1 rounded-md border border-border/70 bg-background/70 px-1 py-0.5">
-      <span className="flex h-4 w-4 items-center justify-center text-muted-foreground">{icon}</span>
-      <button
-        ref={trackRef}
-        type="button"
-        role="slider"
-        aria-label={label}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(clampZoomValue(value))}
-        disabled={disabled}
-        title={onReset ? `${label} - double-click to reset` : label}
-        className={cn(
-          'relative h-5 w-16 rounded-sm outline-none transition-colors',
-          disabled ? 'cursor-default opacity-50' : 'cursor-ew-resize',
-        )}
-        onDoubleClick={onReset}
-        onKeyDown={handleKeyDown}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerRelease}
-        onPointerCancel={handlePointerRelease}
-      >
-        <span className="pointer-events-none absolute inset-x-1 top-1/2 h-px -translate-y-1/2 bg-muted-foreground/45" />
-        <span
-          className="pointer-events-none absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-orange-400/80 bg-background shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
-          style={{ left: thumbLeft }}
-        />
-      </button>
-    </div>
-  )
 }
 
 export const DopesheetEditor = memo(function DopesheetEditor({
