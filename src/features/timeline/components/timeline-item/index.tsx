@@ -7,12 +7,7 @@ import { useItemsStore } from '../../stores/items-store'
 import { useKeyframesStore } from '../../stores/keyframes-store'
 import { useTransitionsStore } from '../../stores/transitions-store'
 import { useEffectDropPreviewStore } from '../../stores/effect-drop-preview-store'
-import { useLinkedEditPreviewStore } from '../../stores/linked-edit-preview-store'
-import { useRollingEditPreviewStore } from '../../stores/rolling-edit-preview-store'
-import { useRippleEditPreviewStore } from '../../stores/ripple-edit-preview-store'
-import { useTrackPushPreviewStore } from '../../stores/track-push-preview-store'
-import { useSlipEditPreviewStore } from '../../stores/slip-edit-preview-store'
-import { useSlideEditPreviewStore } from '../../stores/slide-edit-preview-store'
+import { useEditPreviewShifts } from './use-edit-preview-shifts'
 import { useSelectionStore } from '@/shared/state/selection'
 import { useEditorStore } from '@/shared/state/editor'
 import { useSourcePlayerStore } from '@/shared/state/source-player'
@@ -22,7 +17,6 @@ import { TRANSITION_CONFIGS } from '@/types/transition'
 import { useMediaLibraryStore } from '@/features/timeline/deps/media-library-store'
 import { useCaptionDialogState } from './use-caption-dialog-state'
 import { TranscribeDialogController } from './transcribe-dialog-controller'
-import type { PreviewItemUpdate } from '../../utils/item-edit-preview'
 import {
   useTimelineDrag,
   dragOffsetRef,
@@ -513,34 +507,6 @@ export const TimelineItem = memo(
       ghostRef,
     })
 
-    const linkedEditPreviewUpdate = useLinkedEditPreviewStore(
-      useCallback((s) => s.updatesById[item.id] ?? null, [item.id]),
-    )
-    const isHiddenByLinkedEditPreview = linkedEditPreviewUpdate?.hidden === true
-    const moveDragPreviewFromDelta = useMemo(() => {
-      if (!linkedEditPreviewUpdate || !(isDragging || isPartOfDrag) || gestureMode !== 'none') {
-        return 0
-      }
-
-      return (linkedEditPreviewUpdate.from ?? item.from) - item.from
-    }, [gestureMode, isDragging, isPartOfDrag, item.from, linkedEditPreviewUpdate])
-    const previewBaseItem = useMemo<TimelineItemType>(
-      () =>
-        linkedEditPreviewUpdate && moveDragPreviewFromDelta === 0
-          ? ({ ...item, ...linkedEditPreviewUpdate } as TimelineItemType)
-          : item,
-      [item, linkedEditPreviewUpdate, moveDragPreviewFromDelta],
-    )
-
-    // Get visual feedback for rate stretch
-    const stretchFeedback = isStretching ? getVisualFeedback() : null
-
-    // Check if this clip supports rate stretch (video/audio/composition/GIF)
-    const isRateStretchItem = isRateStretchableItem(previewBaseItem)
-
-    // Current speed for badge display
-    const currentSpeed = previewBaseItem.speed || 1
-
     // Get FPS for frame-to-time conversion
     const fps = useTimelineStore((s) => s.fps)
     const addEffects = useTimelineStore((s) => s.addEffects)
@@ -558,25 +524,45 @@ export const TimelineItem = memo(
         ),
       ),
     )
-    const linkedSyncPreviewUpdatesById = useLinkedEditPreviewStore(
-      useShallow(
-        useCallback(
-          (s) => {
-            const updatesById: Record<string, PreviewItemUpdate> = {}
 
-            for (const linkedItem of linkedItemsForSync) {
-              const linkedPreviewUpdate = s.updatesById[linkedItem.id]
-              if (linkedPreviewUpdate) {
-                updatesById[linkedItem.id] = linkedPreviewUpdate
-              }
-            }
+    const editPreviewShifts = useEditPreviewShifts({
+      item,
+      linkedItemsForSync,
+      isDragging,
+      isPartOfDrag,
+      gestureMode,
+    })
+    const {
+      linkedEditPreviewUpdate,
+      isHiddenByLinkedEditPreview,
+      moveDragPreviewFromDelta,
+      previewBaseItem,
+      linkedSyncPreviewUpdatesById,
+      rollingEditDelta,
+      rollingEditHandle,
+      rollingEditConstrained,
+      rippleEditOffset,
+      rippleEdgeDelta,
+      trackPushOffset,
+      slipEditDelta,
+      isLinkedSlipCompanion,
+      slideEditOffset,
+      slideNeighborDelta,
+      slideNeighborSide,
+      isLinkedSlideCompanion,
+      slideRange,
+      slideLeftNeighborForSlidItem,
+      slideRightNeighborForSlidItem,
+    } = editPreviewShifts
 
-            return updatesById
-          },
-          [linkedItemsForSync],
-        ),
-      ),
-    )
+    // Get visual feedback for rate stretch
+    const stretchFeedback = isStretching ? getVisualFeedback() : null
+
+    // Check if this clip supports rate stretch (video/audio/composition/GIF)
+    const isRateStretchItem = isRateStretchableItem(previewBaseItem)
+
+    // Current speed for badge display
+    const currentSpeed = previewBaseItem.speed || 1
 
     const draggedTransition = useTransitionDragStore((s) => s.draggedTransition)
     const transitionDragPreview = useTransitionDragStore(
@@ -595,165 +581,6 @@ export const TimelineItem = memo(
           return s.itemById[transitionDragPreview.rightClipId] ?? null
         },
         [transitionDragPreview],
-      ),
-    )
-
-    // Rolling edit preview: this item is the neighbor being inversely adjusted.
-    // Single shallow read avoids three subscriptions firing on every drag frame.
-    const rollingEditPreview = useRollingEditPreviewStore(
-      useShallow(
-        useCallback(
-          (s) => {
-            const isNeighbor = s.neighborItemId === item.id
-            return {
-              delta: isNeighbor ? s.neighborDelta : 0,
-              handle: isNeighbor ? s.handle : null,
-              constrained: isNeighbor && s.constrained,
-            }
-          },
-          [item.id],
-        ),
-      ),
-    )
-    const rollingEditDelta = rollingEditPreview.delta
-    const rollingEditHandle = rollingEditPreview.handle
-    const rollingEditConstrained = rollingEditPreview.constrained
-
-    // Ripple edit preview: downstream items shift by delta during ripple trim
-    const rippleEditOffset = useRippleEditPreviewStore(
-      useCallback(
-        (s) => {
-          if (!s.trimmedItemId) return 0
-          if (s.downstreamItemIds.has(item.id)) return s.delta
-          return 0
-        },
-        [item.id],
-      ),
-    )
-
-    // Ripple edit preview: trimmed item reads the downstream shift (delta) from
-    // the same store so the new right edge can be computed from frames - the same
-    // rounding path downstream items use - preventing Math.round(A)+Math.round(B)
-    // != Math.round(A+B) gaps.
-    const rippleEdgeDelta = useRippleEditPreviewStore(
-      useCallback(
-        (s) => {
-          if (s.trimmedItemId !== item.id) return 0
-          return s.delta
-        },
-        [item.id],
-      ),
-    )
-
-    // Track push preview: all shifted items (anchor + downstream) move by delta
-    const trackPushOffset = useTrackPushPreviewStore(
-      useCallback(
-        (s) => {
-          if (!s.anchorItemId) return 0
-          if (s.shiftedItemIds.has(item.id)) return s.delta
-          return 0
-        },
-        [item.id],
-      ),
-    )
-
-    // Slip edit preview: source window shift for the active slipped clip.
-    // Used to update filmstrip/waveform source alignment during drag.
-    const slipEditDelta = useSlipEditPreviewStore(
-      useCallback(
-        (s) => {
-          if (s.itemId !== item.id) return 0
-          return s.slipDelta
-        },
-        [item.id],
-      ),
-    )
-
-    // Linked slip companion: true when another clip is being slipped and this
-    // item receives a linked sourceStart/sourceEnd preview update.
-    const isLinkedSlipCompanion =
-      useSlipEditPreviewStore(
-        useCallback((s) => s.itemId !== null && s.itemId !== item.id, [item.id]),
-      ) &&
-      linkedEditPreviewUpdate !== null &&
-      linkedEditPreviewUpdate.sourceStart !== undefined
-
-    // Single shallow read covers slide preview role + range. Previously this
-    // store was subscribed to seven times per timeline item; useShallow returns
-    // a stable object so React still re-renders only when one of the fields
-    // changes.
-    const slidePreview = useSlideEditPreviewStore(
-      useShallow(
-        useCallback(
-          (s) => ({
-            activeItemId: s.itemId,
-            primaryLeftNeighborId: s.itemId === item.id ? s.leftNeighborId : null,
-            primaryRightNeighborId: s.itemId === item.id ? s.rightNeighborId : null,
-            slideDelta: s.slideDelta,
-            minDelta: s.minDelta,
-            maxDelta: s.maxDelta,
-            isPrimary: s.itemId === item.id,
-            isLeftNeighbor: s.leftNeighborId === item.id,
-            isRightNeighbor: s.rightNeighborId === item.id,
-          }),
-          [item.id],
-        ),
-      ),
-    )
-
-    const slideEditOffset = slidePreview.isPrimary ? slidePreview.slideDelta : 0
-    const slideNeighborDelta =
-      slidePreview.isLeftNeighbor || slidePreview.isRightNeighbor ? slidePreview.slideDelta : 0
-    const slideNeighborSide: 'left' | 'right' | null = slidePreview.isLeftNeighbor
-      ? 'left'
-      : slidePreview.isRightNeighbor
-        ? 'right'
-        : null
-
-    // Linked slide companion: true ONLY when this item is the direct linked
-    // companion of the slid clip (not a counterpart of a neighbor).
-    // Reads items store non-reactively — re-evaluates when slidePreview changes.
-    const isLinkedSlideCompanion = useMemo(() => {
-      if (!slidePreview.activeItemId || slidePreview.isPrimary) return false
-      if (slidePreview.isLeftNeighbor || slidePreview.isRightNeighbor) return false
-      const items = useItemsStore.getState().items
-      const linkedIds = getLinkedItemIds(items, slidePreview.activeItemId)
-      return linkedIds.includes(item.id)
-    }, [
-      item.id,
-      slidePreview.activeItemId,
-      slidePreview.isPrimary,
-      slidePreview.isLeftNeighbor,
-      slidePreview.isRightNeighbor,
-    ])
-
-    // Stable reference so downstream useMemo deps don't churn.
-    const slideRange = useMemo(
-      () =>
-        slidePreview.activeItemId !== null
-          ? { minDelta: slidePreview.minDelta, maxDelta: slidePreview.maxDelta }
-          : null,
-      [slidePreview.activeItemId, slidePreview.minDelta, slidePreview.maxDelta],
-    )
-
-    const slideLeftNeighborIdForSlidItem = slidePreview.primaryLeftNeighborId
-    const slideRightNeighborIdForSlidItem = slidePreview.primaryRightNeighborId
-    const slideLeftNeighborForSlidItem = useItemsStore(
-      useCallback(
-        (s) => {
-          if (!slideLeftNeighborIdForSlidItem) return null
-          return s.itemById[slideLeftNeighborIdForSlidItem] ?? null
-        },
-        [slideLeftNeighborIdForSlidItem],
-      ),
-    )
-    const slideRightNeighborForSlidItem = useItemsStore(
-      useCallback(
-        (s) => {
-          if (!slideRightNeighborIdForSlidItem) return null
-          return s.itemById[slideRightNeighborIdForSlidItem] ?? null
-        },
-        [slideRightNeighborIdForSlidItem],
       ),
     )
 
