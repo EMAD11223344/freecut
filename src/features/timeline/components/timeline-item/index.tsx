@@ -82,8 +82,8 @@ import {
   smartTrimIntentToHandle,
   smartTrimIntentToMode,
   type SmartBodyIntent,
-  type SmartTrimIntent,
 } from '../../utils/smart-trim-zones'
+import { useSmartTrimHover } from './use-smart-trim-hover'
 import { useMarkersStore } from '../../stores/markers-store'
 import { useCompositionNavigationStore } from '../../stores/composition-navigation-store'
 import { useTimelineItemOverlayStore } from '../../stores/timeline-item-overlay-store'
@@ -114,9 +114,6 @@ const ACTIVE_CURSOR_CLASSES = [
   'timeline-cursor-gauge',
   'timeline-cursor-track-push',
 ] as const
-
-// Width in pixels for trim edge hover detection
-const EDGE_HOVER_ZONE = SMART_TRIM_EDGE_ZONE_PX
 
 // Track-push trigger zone: scale with zoom so it stays hittable when zoomed out
 const TRACK_PUSH_MIN_PX = 6
@@ -300,19 +297,6 @@ export const TimelineItem = memo(
     // Use ref for activeTool to avoid callback recreation on mode changes (prevents playback lag)
     const activeToolRef = useRef(activeTool)
     activeToolRef.current = activeTool
-
-    // Track which edge is being hovered for showing trim/rate-stretch handles
-    const [hoveredEdge, setHoveredEdge] = useState<'start' | 'end' | null>(null)
-    const [smartTrimIntent, setSmartTrimIntent] = useState<SmartTrimIntent>(null)
-    const [smartBodyIntent, setSmartBodyIntent] = useState<SmartBodyIntent>(null)
-
-    // Clear stale hover state when the active tool changes (mouse may be stationary)
-    useEffect(() => {
-      setHoveredEdge(null)
-      setSmartTrimIntent(null)
-      setSmartBodyIntent(null)
-      useRollHoverStore.getState().clearRollHover(item.id)
-    }, [activeTool, item.id])
 
     // When an adjacent item enters roll mode, this item's edge should glow too
     const rollHoverEdge = useRollHoverStore(
@@ -504,6 +488,21 @@ export const TimelineItem = memo(
       isDragging,
       transformRef,
       ghostRef,
+    })
+
+    const {
+      hoveredEdge,
+      smartTrimIntent,
+      smartBodyIntent,
+      smartTrimIntentRef,
+      handleMouseMove,
+      handleMouseLeave,
+    } = useSmartTrimHover({
+      item,
+      trackLocked,
+      activeTool,
+      activeToolRef,
+      isAnyDragActiveRef,
     })
 
     // Get FPS for frame-to-time conversion
@@ -968,7 +967,7 @@ export const TimelineItem = memo(
           selectItems(targetIds)
         }
       },
-      [dragWasActiveRef, trackLocked, item.from, item.id],
+      [dragWasActiveRef, trackLocked, item.from, item.id, smartTrimIntentRef],
     )
 
     // Double-click: open media in source monitor with clip's source range as I/O
@@ -1012,144 +1011,6 @@ export const TimelineItem = memo(
         useEditorStore.getState().setSourcePreviewMediaId(item.mediaId)
       },
       [trackLocked, item],
-    )
-
-    // Handle mouse move for edge hover detection
-    const hoveredEdgeRef = useRef(hoveredEdge)
-    hoveredEdgeRef.current = hoveredEdge
-    const smartTrimIntentRef = useRef(smartTrimIntent)
-    smartTrimIntentRef.current = smartTrimIntent
-    const smartBodyIntentRef = useRef(smartBodyIntent)
-    smartBodyIntentRef.current = smartBodyIntent
-
-    const syncHoveredEdge = useCallback((nextHoveredEdge: 'start' | 'end' | null) => {
-      hoveredEdgeRef.current = nextHoveredEdge
-      setHoveredEdge(nextHoveredEdge)
-    }, [])
-
-    const syncSmartTrimIntent = useCallback((nextIntent: SmartTrimIntent) => {
-      smartTrimIntentRef.current = nextIntent
-      setSmartTrimIntent(nextIntent)
-    }, [])
-
-    const syncSmartBodyIntent = useCallback((nextIntent: SmartBodyIntent) => {
-      smartBodyIntentRef.current = nextIntent
-      setSmartBodyIntent(nextIntent)
-    }, [])
-
-    const handleMouseMove = useCallback(
-      (e: React.MouseEvent) => {
-        if (trackLocked || activeToolRef.current === 'razor' || isAnyDragActiveRef.current) {
-          if (hoveredEdgeRef.current !== null) syncHoveredEdge(null)
-          if (smartTrimIntentRef.current !== null) syncSmartTrimIntent(null)
-          if (smartBodyIntentRef.current !== null) syncSmartBodyIntent(null)
-          return
-        }
-
-        const rect = e.currentTarget.getBoundingClientRect()
-        const x = e.clientX - rect.left
-        const y = e.clientY - rect.top
-        const itemWidth = rect.width
-
-        if (activeToolRef.current === 'trim-edit' || activeToolRef.current === 'select') {
-          const items = useTimelineStore.getState().items
-          const transitions = useTransitionsStore.getState().transitions
-          const hasLeftNeighbor = !!findHandleNeighborWithTransitions(
-            item,
-            'start',
-            items,
-            transitions,
-          )
-          const hasRightNeighbor = !!findHandleNeighborWithTransitions(
-            item,
-            'end',
-            items,
-            transitions,
-          )
-          const hasStartBridge = hasTransitionBridgeAtHandle(transitions, item.id, 'start')
-          const hasEndBridge = hasTransitionBridgeAtHandle(transitions, item.id, 'end')
-          const nextIntent = resolveSmartTrimIntent({
-            x,
-            width: itemWidth,
-            hasLeftNeighbor,
-            hasRightNeighbor,
-            hasStartBridge,
-            hasEndBridge,
-            preferRippleOuterEdges: activeToolRef.current === 'trim-edit',
-            currentIntent: smartTrimIntentRef.current,
-            edgeZonePx: SMART_TRIM_EDGE_ZONE_PX,
-            rollZonePx: SMART_TRIM_ROLL_ZONE_PX,
-            retentionPx: SMART_TRIM_RETENTION_PX,
-          })
-          const nextHoveredEdge = smartTrimIntentToHandle(nextIntent)
-
-          if (smartTrimIntentRef.current !== nextIntent) {
-            const prevIntent = smartTrimIntentRef.current
-            syncSmartTrimIntent(nextIntent)
-            // Publish roll-hover neighbor so the adjacent item also shows its edge
-            if (nextIntent === 'roll-start') {
-              const neighbor = findHandleNeighborWithTransitions(item, 'start', items, transitions)
-              if (neighbor) useRollHoverStore.getState().setRollHover(item.id, neighbor.id, 'end')
-            } else if (nextIntent === 'roll-end') {
-              const neighbor = findHandleNeighborWithTransitions(item, 'end', items, transitions)
-              if (neighbor) useRollHoverStore.getState().setRollHover(item.id, neighbor.id, 'start')
-            } else if (prevIntent === 'roll-start' || prevIntent === 'roll-end') {
-              // Was rolling, no longer - clear
-              useRollHoverStore.getState().clearRollHover(item.id)
-            }
-          }
-          if (hoveredEdgeRef.current !== nextHoveredEdge) {
-            syncHoveredEdge(nextHoveredEdge)
-          }
-
-          if (activeToolRef.current === 'select') {
-            if (smartBodyIntentRef.current !== null) syncSmartBodyIntent(null)
-            return
-          }
-
-          if (nextIntent) {
-            if (smartBodyIntentRef.current !== null) syncSmartBodyIntent(null)
-            return
-          }
-
-          const nextBodyIntent = resolveSmartBodyIntent({
-            y,
-            height: rect.height,
-            labelRowHeight: getTimelineClipLabelRowHeightPx(e.currentTarget),
-            isMediaItem:
-              item.type === 'video' || item.type === 'audio' || item.type === 'composition',
-            currentIntent: smartBodyIntentRef.current,
-          })
-          if (smartBodyIntentRef.current !== nextBodyIntent) {
-            syncSmartBodyIntent(nextBodyIntent)
-          }
-          return
-        }
-
-        if (smartTrimIntentRef.current !== null) syncSmartTrimIntent(null)
-        if (smartBodyIntentRef.current !== null) syncSmartBodyIntent(null)
-
-        if (activeToolRef.current === 'rate-stretch') {
-          if (hoveredEdgeRef.current !== null) syncHoveredEdge(null)
-          return
-        }
-
-        if (x <= EDGE_HOVER_ZONE) {
-          if (hoveredEdgeRef.current !== 'start') syncHoveredEdge('start')
-        } else if (x >= itemWidth - EDGE_HOVER_ZONE) {
-          if (hoveredEdgeRef.current !== 'end') syncHoveredEdge('end')
-        } else {
-          if (hoveredEdgeRef.current !== null) syncHoveredEdge(null)
-        }
-      },
-      [
-        isAnyDragActiveRef,
-        item,
-        syncHoveredEdge,
-        syncSmartBodyIntent,
-        syncSmartTrimIntent,
-        trackLocked,
-      ],
     )
 
     // Cursor class based on state
@@ -1575,7 +1436,7 @@ export const TimelineItem = memo(
               labelRowHeight: getTimelineClipLabelRowHeightPx(e.currentTarget),
               isMediaItem:
                 item.type === 'video' || item.type === 'audio' || item.type === 'composition',
-              currentIntent: smartBodyIntentRef.current,
+              currentIntent: smartBodyIntent,
             })
           }
         }
@@ -1643,16 +1504,10 @@ export const TimelineItem = memo(
         handleSlipSlideStart,
         handleStretchStart,
         item,
+        smartBodyIntent,
+        smartTrimIntentRef,
       ],
     )
-
-    // Track which edge is closer when right-clicking for context menu
-    const handleMouseLeave = useCallback(() => {
-      syncHoveredEdge(null)
-      syncSmartTrimIntent(null)
-      syncSmartBodyIntent(null)
-      useRollHoverStore.getState().clearRollHover(item.id)
-    }, [item.id, syncHoveredEdge, syncSmartBodyIntent, syncSmartTrimIntent])
 
     const handleSmartTrimStart = useCallback(
       (e: React.MouseEvent, handle: 'start' | 'end') => {
@@ -1679,7 +1534,7 @@ export const TimelineItem = memo(
             : undefined,
         )
       },
-      [handleTrimStart, item.id],
+      [handleTrimStart, item.id, smartTrimIntentRef],
     )
 
     const handleContextMenu = useCallback(
