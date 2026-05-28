@@ -47,6 +47,11 @@ const logger = createLogger('WaveformCache')
 // than dropping them, so a single clip longer than ~4.5h is still cached (it
 // just evicts the rest of the working set while resident).
 const MAX_CACHE_SIZE_BYTES = 128 * 1024 * 1024 // 128MB
+// Separate, smaller budget for downsampled display levels (see getDisplayLevel).
+// These are what the timeline renders: a zoom-appropriate resolution level
+// (e.g. 10–50 samples/sec when zoomed out) is a fraction of the full-res peaks,
+// so the working set of visible clips stays tiny regardless of clip length.
+const MAX_LEVEL_CACHE_SIZE_BYTES = 64 * 1024 * 1024 // 64MB
 const MAX_CONCURRENT_WAVEFORM_GENERATIONS = 1
 const WAVEFORM_PROGRESS_NOTIFY_INTERVAL_MS = 120
 const WAVEFORM_PROGRESS_NOTIFY_STEP = 2
@@ -68,6 +73,23 @@ export interface CachedWaveform {
   sizeBytes: number
   lastAccessed: number
   isComplete: boolean
+}
+
+/**
+ * A single downsampled resolution level used for timeline rendering. Unlike
+ * CachedWaveform this never holds full-resolution peaks unless the chosen zoom
+ * level is the highest one — when zoomed out it is a small fraction of the size.
+ */
+export interface CachedWaveformLevel {
+  peaks: Float32Array
+  sampleRate: number
+  channels: number
+  stereo: boolean
+  duration: number
+  maxPeak: number
+  loadedSamples: number
+  sizeBytes: number
+  lastAccessed: number
 }
 
 export class AbortError extends Error {
@@ -97,6 +119,8 @@ type WaveformUpdateCallback = (waveform: CachedWaveform) => void
 
 class WaveformCacheService {
   private memoryCache = new SizedAccessedMemoryCache<CachedWaveform>(MAX_CACHE_SIZE_BYTES)
+  private levelCache = new SizedAccessedMemoryCache<CachedWaveformLevel>(MAX_LEVEL_CACHE_SIZE_BYTES)
+  private pendingLevelRequests = new Map<string, Promise<CachedWaveformLevel | null>>()
   private pendingRequests = new Map<string, PendingRequest>()
   private updateCallbacks = new Map<string, Set<WaveformUpdateCallback>>()
   private workerRequestId = 0
@@ -245,6 +269,66 @@ class WaveformCacheService {
    */
   private addToMemoryCache(mediaId: string, data: CachedWaveform): void {
     this.memoryCache.add(mediaId, data)
+  }
+
+  private levelCacheKey(mediaId: string, levelIndex: number): string {
+    return `${mediaId}:${levelIndex}`
+  }
+
+  /**
+   * Synchronously read a cached display level. Lets a remounting clip render
+   * immediately (no skeleton) when the level was already loaded this session.
+   */
+  getDisplayLevelSync(mediaId: string, levelIndex: number): CachedWaveformLevel | null {
+    return this.levelCache.get(this.levelCacheKey(mediaId, levelIndex))
+  }
+
+  /**
+   * Load a single downsampled resolution level for display, from the persisted
+   * OPFS multi-resolution file. Returns null when no persisted waveform exists
+   * (caller should fall back to the full-resolution generate/load path).
+   *
+   * This is what the timeline should render from: it keeps only a
+   * zoom-appropriate level resident (tiny when zoomed out) instead of the full
+   * 1000-samples/sec peaks, so display memory is bounded regardless of clip
+   * length. Max-pooling during downsampling preserves the global peak, so
+   * normalization is consistent across levels.
+   */
+  async getDisplayLevel(mediaId: string, levelIndex: number): Promise<CachedWaveformLevel | null> {
+    const key = this.levelCacheKey(mediaId, levelIndex)
+    const cached = this.levelCache.get(key)
+    if (cached) return cached
+
+    // De-dupe concurrent loads of the same level (e.g. several clips of the
+    // same media entering the viewport at once).
+    const inFlight = this.pendingLevelRequests.get(key)
+    if (inFlight) return inFlight
+
+    const request = (async (): Promise<CachedWaveformLevel | null> => {
+      const level = await waveformOPFSStorage.getLevel(mediaId, levelIndex)
+      if (!level) return null
+
+      const floatsPerSample = level.channels >= 2 ? 2 : 1
+      const sampleCount = level.peaks.length / floatsPerSample
+      const result: CachedWaveformLevel = {
+        peaks: level.peaks,
+        sampleRate: level.sampleRate,
+        channels: level.channels,
+        stereo: level.channels >= 2,
+        duration: level.sampleRate > 0 ? sampleCount / level.sampleRate : 0,
+        maxPeak: this.computeMaxPeak(level.peaks),
+        loadedSamples: level.peaks.length,
+        sizeBytes: level.peaks.byteLength,
+        lastAccessed: Date.now(),
+      }
+      this.levelCache.add(key, result)
+      return result
+    })().finally(() => {
+      this.pendingLevelRequests.delete(key)
+    })
+
+    this.pendingLevelRequests.set(key, request)
+    return request
   }
 
   private makeCachedWaveform(
@@ -1157,8 +1241,11 @@ class WaveformCacheService {
    * Clear waveform for a media item from all caches
    */
   async clearMedia(mediaId: string): Promise<void> {
-    // Clear from memory cache
+    // Clear from memory cache (full-res and all display levels)
     this.memoryCache.delete(mediaId)
+    for (let levelIndex = 0; levelIndex < WAVEFORM_LEVELS.length; levelIndex++) {
+      this.levelCache.delete(this.levelCacheKey(mediaId, levelIndex))
+    }
 
     // Clear from OPFS
     await waveformOPFSStorage.delete(mediaId)
@@ -1173,6 +1260,7 @@ class WaveformCacheService {
    */
   clearAll(): void {
     this.memoryCache.clear()
+    this.levelCache.clear()
   }
 
   /**

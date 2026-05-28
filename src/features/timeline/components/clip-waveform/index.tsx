@@ -196,6 +196,7 @@ export const ClipWaveform = memo(function ClipWaveform({
       isVisible,
       enabled: audioCodecSupported,
       deferDurationSec: sourceDuration,
+      pixelsPerSecond,
     })
   const normalizationPeak = maxPeak > 0 ? maxPeak : 1
   const peakSampleCount = useMemo(

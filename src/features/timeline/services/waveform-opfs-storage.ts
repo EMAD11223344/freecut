@@ -73,8 +73,8 @@ export interface MultiResolutionWaveform {
 }
 
 /**
- * Choose the best resolution level for a given pixelsPerSecond
- * Higher zoom (more pixels/sec) = higher resolution needed
+ * Choose a resolution level for range-based reads where bars are a few pixels
+ * wide (used by getWaveformRange/getWaveformLevel).
  */
 export function chooseLevelForZoom(pixelsPerSecond: number): number {
   // Bars are typically 2-3 pixels wide, so we want ~1 sample per 3 pixels
@@ -86,6 +86,29 @@ export function chooseLevelForZoom(pixelsPerSecond: number): number {
     }
   }
   return WAVEFORM_LEVELS.length - 1
+}
+
+/**
+ * Choose the resolution level for rendering a full clip's waveform at a given
+ * zoom. The renderer draws roughly one point per pixel, so we need at least one
+ * sample per pixel to stay crisp — pick the *coarsest* level whose sample rate
+ * still meets that density (smallest memory footprint that looks sharp), and
+ * fall back to the finest level when even it is below the pixel density.
+ *
+ * This is deliberately less aggressive than chooseLevelForZoom: under-sampling
+ * a full-clip waveform produces visibly blocky peaks when zoomed in.
+ */
+export function chooseDisplayLevelForZoom(pixelsPerSecond: number): number {
+  const neededSamplesPerSecond = Math.max(1, pixelsPerSecond)
+
+  // WAVEFORM_LEVELS is descending; walk from coarsest to finest and take the
+  // first (coarsest) level that still has at least one sample per pixel.
+  for (let i = WAVEFORM_LEVELS.length - 1; i >= 0; i--) {
+    if (WAVEFORM_LEVELS[i]! >= neededSamplesPerSecond) {
+      return i
+    }
+  }
+  return 0
 }
 
 /**
