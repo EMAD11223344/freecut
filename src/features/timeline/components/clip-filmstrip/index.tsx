@@ -1,5 +1,6 @@
 import { memo, useEffect, useState, useMemo, useCallback, useRef, type RefCallback } from 'react'
 import { FilmstripSkeleton } from './filmstrip-skeleton'
+import { computeFilmstripRenderWindow } from './render-window'
 import { useFilmstrip, type FilmstripFrame } from '../../hooks/use-filmstrip'
 import { resolveMediaUrl, resolveProxyUrl } from '@/features/timeline/deps/media-library-resolver'
 import { useMediaBlobUrl } from '../../hooks/use-media-blob-url'
@@ -8,6 +9,11 @@ import { createLogger } from '@/shared/logging/logger'
 import { useMediaLibraryStore } from '@/features/timeline/deps/media-library-store'
 
 const logger = createLogger('ClipFilmstrip')
+
+// Pad the rendered tile window beyond the visible range so a fast scrub never
+// outruns the mounted tiles within a frame. Matches the animated-image filmstrip.
+const VIEWPORT_PAD_TILES = 2
+const VIEWPORT_PAD_PX = 600
 
 interface ClipFilmstripProps {
   /** Media ID from the timeline item */
@@ -205,6 +211,8 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
   speed,
   isReversed = false,
   isVisible,
+  visibleStartRatio = 0,
+  visibleEndRatio = 1,
   pixelsPerSecond,
 }: ClipFilmstripProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -335,17 +343,33 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
   // - Tile width is exactly thumbnailWidth — never stretched, squashed, or
   //   merged. Segment boundaries are handled by overflow clipping outside the
   //   tile, so a short segment only reveals less of the full-size tile.
-  // - key=slot is the integer slot index on the pixel grid. At fixed zoom the
-  //   slot set never changes; scrolling can't refresh tiles, and a slot's
-  //   frame prop updating as extraction lands doesn't remount its DOM.
+  // - key=slot is the integer slot index on the pixel grid, so a slot that stays
+  //   inside the window keeps its DOM as the window slides; a slot's frame prop
+  //   updating as extraction lands doesn't remount its DOM either.
+  // - Only slots intersecting the visible window (+ pad) are emitted, mirroring
+  //   the animated-image filmstrip and the waveform's TiledCanvas. Without this
+  //   a clip spanning a large fraction of a max-zoom timeline mounts one tile per
+  //   slot across its ENTIRE width (thousands of <img>s), which React must
+  //   reconcile and the compositor must paint on every scroll frame — the
+  //   dominant cost when scrubbing the navigator at high zoom. Off-window areas
+  //   keep showing the repeating cover-frame background, so windowing is seamless.
   const tiles = useMemo(() => {
     if (!frames || frames.length === 0 || renderPixelsPerSecond <= 0) return []
     if (effectiveEnd <= effectiveStart) return []
 
     const pixelsPerSourceSecond = renderPixelsPerSecond / Math.max(0.0001, speed)
     const tileWidth = thumbnailWidth
-    const slotCount = Math.ceil(renderClipWidth / tileWidth)
-    if (slotCount === 0) return []
+
+    const { startTile, endTile } = computeFilmstripRenderWindow({
+      renderWidth: renderClipWidth,
+      visibleWidth: visibleClipWidth,
+      tileWidth,
+      visibleStartRatio,
+      visibleEndRatio,
+      minimumPadTiles: VIEWPORT_PAD_TILES,
+      minimumPadPx: VIEWPORT_PAD_PX,
+    })
+    if (endTile <= startTile) return []
 
     const findClosestFrame = (targetTime: number): FilmstripFrame | null => {
       if (frames.length === 0) return null
@@ -369,7 +393,7 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
 
     const result: { slot: number; frame: FilmstripFrame; x: number; width: number }[] = []
 
-    for (let slot = 0; slot < slotCount; slot++) {
+    for (let slot = startTile; slot < endTile; slot++) {
       const slotX = slot * tileWidth
       const slotCenterX = slotX + tileWidth * 0.5
       const slotCenterTime = isReversed
@@ -385,6 +409,9 @@ export const ClipFilmstrip = memo(function ClipFilmstrip({
     frames,
     renderPixelsPerSecond,
     renderClipWidth,
+    visibleClipWidth,
+    visibleStartRatio,
+    visibleEndRatio,
     effectiveStart,
     effectiveEnd,
     isReversed,
