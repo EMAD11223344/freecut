@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { Link2 } from 'lucide-react'
 import { perfMarkRender } from '@/shared/logging/perf-marks'
 import type { TimelineItem } from '@/types/timeline'
@@ -179,6 +179,23 @@ export const ClipContent = memo(function ClipContent({
   )
   const showWaveforms = useSettingsStore((s) => s.showWaveforms)
   const showFilmstrips = useSettingsStore((s) => s.showFilmstrips)
+
+  // Defer the heavy filmstrip/waveform mount for clips that first appear DURING
+  // an active zoom gesture. Zooming out brings many clips into the viewport at
+  // once, and mounting each one's tile grid + canvas draws is ~90% of zoom-out
+  // cost. A clip that mounts mid-gesture shows just its colored shell until the
+  // zoom settles, then reveals the thumbnails. This is read once at mount via
+  // getState() (NOT a reactive subscription) so already-mounted clips never
+  // re-render — only clips born mid-gesture defer, and only they subscribe (to
+  // flip themselves on once interaction ends).
+  const [deferVisual, setDeferVisual] = useState(() => useZoomStore.getState().isZoomInteracting)
+  useEffect(() => {
+    if (!deferVisual) return
+    return useZoomStore.subscribe((state) => {
+      if (!state.isZoomInteracting) setDeferVisual(false)
+    })
+  }, [deferVisual])
+
   const clipLeftPx = useMemo(
     () => (fps > 0 ? (clipLeftFrames / fps) * pixelsPerSecond : 0),
     [clipLeftFrames, fps, pixelsPerSecond],
@@ -357,7 +374,7 @@ export const ClipContent = memo(function ClipContent({
     [renderTitleText],
   )
 
-  const showVisualContent = clipWidth >= FILMSTRIP_MIN_WIDTH_PX
+  const showVisualContent = clipWidth >= FILMSTRIP_MIN_WIDTH_PX && !deferVisual
 
   // Video clip 2-row layout: label | filmstrip
   if (item.type === 'video' && item.mediaId) {
