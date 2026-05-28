@@ -17,10 +17,13 @@ import { ensureAc3DecoderRegistered, isAc3AudioCodec } from '@/shared/utils/ac3-
 import {
   buildDownsampledStereo,
   downmixToStereo,
+  int16ToFloat32Into,
   produceDecodedBin,
   type DecodedAudioBinData,
 } from './audio-decode-dsp'
 import type {
+  AudioAssembleBinsRequest,
+  AudioAssembledResponse,
   AudioDecodeBinResponse,
   AudioDecodeCompleteResponse,
   AudioDecodeErrorResponse,
@@ -322,6 +325,29 @@ async function decodeWindow(
   }
 }
 
+/** Reassemble persisted Int16 bins into Float32 stereo channels off-thread. */
+function assembleBins(message: AudioAssembleBinsRequest): void {
+  const { requestId, totalFrames, bins } = message
+  const left = new Float32Array(totalFrames)
+  const right = new Float32Array(totalFrames)
+
+  let offset = 0
+  for (const bin of bins) {
+    int16ToFloat32Into(new Int16Array(bin.left), left, offset)
+    int16ToFloat32Into(new Int16Array(bin.right), right, offset)
+    offset += bin.frames
+  }
+
+  const response: AudioAssembledResponse = {
+    type: 'assembled',
+    requestId,
+    frames: totalFrames,
+    left: left.buffer as ArrayBuffer,
+    right: right.buffer as ArrayBuffer,
+  }
+  self.postMessage(response, { transfer: [response.left, response.right] })
+}
+
 self.onmessage = async (event: MessageEvent<AudioDecodeWorkerMessage>) => {
   const message = event.data
 
@@ -330,9 +356,15 @@ self.onmessage = async (event: MessageEvent<AudioDecodeWorkerMessage>) => {
       await decode(message)
     } else if (message.type === 'decode-window') {
       await decodeWindow(message)
+    } else if (message.type === 'assemble-bins') {
+      assembleBins(message)
     }
   } catch (err) {
-    log.warn('Audio decode worker failed', { mediaId: message.mediaId, type: message.type, err })
+    log.warn('Audio decode worker failed', {
+      mediaId: 'mediaId' in message ? message.mediaId : undefined,
+      type: message.type,
+      err,
+    })
     const response: AudioDecodeErrorResponse = {
       type: 'error',
       requestId: message.requestId,

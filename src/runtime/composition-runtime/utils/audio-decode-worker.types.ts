@@ -30,7 +30,23 @@ export interface AudioDecodeWindowRequest {
   storageSampleRate: number
 }
 
-export type AudioDecodeWorkerMessage = AudioDecodeRequest | AudioDecodeWindowRequest
+/**
+ * Reassemble persisted Int16 bins into Float32 stereo channels off the main
+ * thread. The main thread reads the bins from disk, hands their Int16 buffers
+ * here, and copies the returned Float32 channels straight into an AudioBuffer.
+ */
+export interface AudioAssembleBinsRequest {
+  type: 'assemble-bins'
+  requestId: string
+  totalFrames: number
+  /** Per-bin Int16 PCM, in playback order. */
+  bins: { frames: number; left: ArrayBuffer; right: ArrayBuffer }[]
+}
+
+export type AudioDecodeWorkerMessage =
+  | AudioDecodeRequest
+  | AudioDecodeWindowRequest
+  | AudioAssembleBinsRequest
 
 export interface AudioDecodeBinResponse {
   type: 'bin'
@@ -61,6 +77,16 @@ export interface AudioDecodeWindowResponse {
   right: ArrayBuffer
 }
 
+/** Reassembled Float32 stereo channels for AudioBuffer construction. */
+export interface AudioAssembledResponse {
+  type: 'assembled'
+  requestId: string
+  frames: number
+  /** Float32 PCM, transferred. */
+  left: ArrayBuffer
+  right: ArrayBuffer
+}
+
 export interface AudioDecodeErrorResponse {
   type: 'error'
   requestId: string
@@ -71,4 +97,5 @@ export type AudioDecodeWorkerResponse =
   | AudioDecodeBinResponse
   | AudioDecodeCompleteResponse
   | AudioDecodeWindowResponse
+  | AudioAssembledResponse
   | AudioDecodeErrorResponse

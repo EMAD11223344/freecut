@@ -752,6 +752,56 @@ function decodeFullAudioViaWorker(mediaId: string, src: PreviewAudioSource): Pro
   })
 }
 
+interface AssembleBinInput {
+  frames: number
+  left: ArrayBuffer
+  right: ArrayBuffer
+}
+
+/**
+ * Reassemble persisted Int16 bins into Float32 stereo channels on the decode
+ * worker so the (potentially ~second-long) dequant loop stays off the main
+ * thread. Bin buffers are copied (not transferred) so the caller can fall back
+ * to the synchronous main-thread path if the worker errors.
+ */
+function assembleBinsViaWorker(
+  totalFrames: number,
+  bins: AssembleBinInput[],
+): Promise<{ left: Float32Array; right: Float32Array }> {
+  return new Promise((resolve, reject) => {
+    const worker = getAudioDecodeWorker()
+    const requestId = `audio-assemble-${++audioDecodeRequestCounter}`
+
+    const cleanup = () => {
+      worker.removeEventListener('message', onMessage)
+      worker.removeEventListener('error', onError)
+    }
+
+    const onMessage = (event: MessageEvent<AudioDecodeWorkerResponse>) => {
+      const message = event.data
+      if (message.requestId !== requestId) return
+
+      if (message.type === 'assembled') {
+        cleanup()
+        resolve({ left: new Float32Array(message.left), right: new Float32Array(message.right) })
+      } else if (message.type === 'error') {
+        cleanup()
+        reject(new Error(message.error))
+      }
+    }
+
+    const onError = (event: ErrorEvent) => {
+      cleanup()
+      reject(event.error instanceof Error ? event.error : new Error('Audio assemble worker error'))
+    }
+
+    worker.addEventListener('message', onMessage)
+    worker.addEventListener('error', onError)
+
+    worker.postMessage({ type: 'assemble-bins', requestId, totalFrames, bins })
+  })
+}
+
 function decodeAudioWindowViaWorker(
   mediaId: string,
   src: PreviewAudioSource,
@@ -894,6 +944,7 @@ async function loadFromBins(meta: DecodedPreviewAudioMeta): Promise<AudioBuffer>
   const bins = await Promise.all(binPromises)
 
   let offset = 0
+  const validatedBins: AssembleBinInput[] = []
   for (let i = 0; i < bins.length; i++) {
     const bin = bins[i]
     if (!(bin && 'kind' in bin && bin.kind === 'bin')) {
@@ -904,24 +955,46 @@ async function loadFromBins(meta: DecodedPreviewAudioMeta): Promise<AudioBuffer>
     if (b.frames <= 0) {
       throw new Error(`Invalid frame count in decoded audio bin ${i}`)
     }
-
-    const leftInt16 = new Int16Array(b.left)
-    const rightInt16 = new Int16Array(b.right)
-
-    if (leftInt16.length !== b.frames || rightInt16.length !== b.frames) {
+    if (b.left.byteLength / 2 !== b.frames || b.right.byteLength / 2 !== b.frames) {
       throw new Error(`Corrupt decoded audio bin ${i}`)
     }
     if (offset + b.frames > totalFrames) {
       throw new Error(`Decoded audio bins exceed expected frame length (${mediaId})`)
     }
 
-    int16ToFloat32Into(leftInt16, leftChannel, offset)
-    int16ToFloat32Into(rightInt16, rightChannel, offset)
+    validatedBins.push({ frames: b.frames, left: b.left, right: b.right })
     offset += b.frames
   }
 
   if (offset !== totalFrames) {
     throw new Error(`Decoded audio bins incomplete: ${offset}/${totalFrames} frames`)
+  }
+
+  // Reassemble off the main thread when possible — the Int16→Float32 dequant is
+  // O(totalFrames) and blocks the main thread for ~hundreds of ms on long clips.
+  // Falls back to the synchronous loop when the worker is unavailable or errors.
+  let assembledViaWorker = false
+  if (canUseAudioDecodeWorker()) {
+    try {
+      const assembled = await assembleBinsViaWorker(totalFrames, validatedBins)
+      leftChannel.set(assembled.left)
+      rightChannel.set(assembled.right)
+      assembledViaWorker = true
+    } catch (err) {
+      log.warn('Worker bin assembly failed, falling back to main-thread assembly', {
+        mediaId,
+        err,
+      })
+    }
+  }
+
+  if (!assembledViaWorker) {
+    let writeOffset = 0
+    for (const b of validatedBins) {
+      int16ToFloat32Into(new Int16Array(b.left), leftChannel, writeOffset)
+      int16ToFloat32Into(new Int16Array(b.right), rightChannel, writeOffset)
+      writeOffset += b.frames
+    }
   }
 
   log.info('Loaded decoded audio from workspace cache', {
