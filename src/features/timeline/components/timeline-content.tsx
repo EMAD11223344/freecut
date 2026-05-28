@@ -15,6 +15,7 @@ import { useSelectionStore } from '@/shared/state/selection'
 // Hooks
 import { useMarqueeSelection } from '@/shared/marquee/use-marquee-selection'
 import { useWaveformPrefetch } from '../hooks/use-waveform-prefetch'
+import { withPerfMeasure, perfMarkRender } from '@/shared/logging/perf-marks'
 
 // Constants
 import {
@@ -220,7 +221,7 @@ function TrackSectionScrollbarOverlay({
       if (scrollFrameId !== 0) return
       scrollFrameId = window.requestAnimationFrame(() => {
         scrollFrameId = 0
-        updateThumbPosition()
+        withPerfMeasure('tl.raf.scrollThumb', updateThumbPosition)
       })
     }
 
@@ -682,6 +683,8 @@ export const TimelineContent = memo(function TimelineContent({
 }: TimelineContentProps) {
   void duration
 
+  perfMarkRender('TimelineContent')
+
   // Prefetch waveforms for clips approaching the viewport
   useWaveformPrefetch()
 
@@ -843,7 +846,7 @@ export const TimelineContent = memo(function TimelineContent({
     if (viewportSyncRafRef.current !== null) return
     viewportSyncRafRef.current = requestAnimationFrame(() => {
       viewportSyncRafRef.current = null
-      syncViewportFromContainer()
+      withPerfMeasure('tl.raf.viewportSync', syncViewportFromContainer)
     })
   }, [syncViewportFromContainer])
 
@@ -1249,7 +1252,7 @@ export const TimelineContent = memo(function TimelineContent({
       }
       previewRafRef.current = requestAnimationFrame(() => {
         previewRafRef.current = null
-        setPreviewFrameRef.current(frame, itemId)
+        withPerfMeasure('tl.raf.previewHover', () => setPreviewFrameRef.current(frame, itemId))
       })
     },
     [buildRazorSnapTargets],
@@ -1327,18 +1330,20 @@ export const TimelineContent = memo(function TimelineContent({
 
       zoomApplyRafRef.current = requestAnimationFrame(() => {
         zoomApplyRafRef.current = null
-        const queuedZoomLevel = queuedZoomLevelRef.current
-        const queuedScrollLeft = queuedZoomScrollLeftRef.current
-        queuedZoomLevelRef.current = null
-        queuedZoomScrollLeftRef.current = null
+        withPerfMeasure('tl.raf.zoomApply', () => {
+          const queuedZoomLevel = queuedZoomLevelRef.current
+          const queuedScrollLeft = queuedZoomScrollLeftRef.current
+          queuedZoomLevelRef.current = null
+          queuedZoomScrollLeftRef.current = null
 
-        if (queuedZoomLevel === null || queuedScrollLeft === null) {
-          return
-        }
+          if (queuedZoomLevel === null || queuedScrollLeft === null) {
+            return
+          }
 
-        pendingScrollRef.current = queuedScrollLeft
-        scrollLeftRef.current = queuedScrollLeft
-        setZoomImmediate(queuedZoomLevel)
+          pendingScrollRef.current = queuedScrollLeft
+          scrollLeftRef.current = queuedScrollLeft
+          setZoomImmediate(queuedZoomLevel)
+        })
       })
     },
     [setZoomImmediate],
@@ -1523,14 +1528,19 @@ export const TimelineContent = memo(function TimelineContent({
     }
 
     const momentumLoop = () => {
-      if (!containerRef.current) return
+      const container = containerRef.current
+      if (!container) return
 
+      withPerfMeasure('tl.raf.momentum', () => momentumLoopBody(container))
+    }
+
+    const momentumLoopBody = (container: HTMLDivElement) => {
       let hasScrollMomentum = false
       let hasZoomMomentum = false
 
       // Apply velocity to scroll position
       if (Math.abs(velocityXRef.current) > SCROLL_MIN_VELOCITY) {
-        containerRef.current.scrollLeft += velocityXRef.current
+        container.scrollLeft += velocityXRef.current
         velocityXRef.current *= SCROLL_FRICTION
         hasScrollMomentum = true
       } else {

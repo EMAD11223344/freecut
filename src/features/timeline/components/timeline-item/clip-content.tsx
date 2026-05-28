@@ -1,5 +1,6 @@
 import { memo, useCallback, useMemo } from 'react'
 import { Link2 } from 'lucide-react'
+import { perfMarkRender } from '@/shared/logging/perf-marks'
 import type { TimelineItem } from '@/types/timeline'
 import { ClipFilmstrip } from '../clip-filmstrip'
 import { ImageFilmstrip } from '../clip-filmstrip/image-filmstrip'
@@ -159,11 +160,23 @@ export const ClipContent = memo(function ClipContent({
   audioWaveformScale = 1,
   linkedSyncOffsetFrames = null,
 }: ClipContentProps) {
-  // Subscribe to live pixelsPerSecond so filmstrip/waveform content stays in sync
-  // with the CSS-variable-driven clip shell during zoom — avoids a visible catchup
-  // jump at settle. Per-item render cost is kept low by the filmstrip skip (<5px)
-  // and compact clip shell optimizations in the parent.
-  const pixelsPerSecond = useZoomStore((s) => s.pixelsPerSecond)
+  perfMarkRender('ClipContent')
+  // Drive filmstrip/waveform width from the SETTLED zoom (contentPixelsPerSecond)
+  // by default, not the live per-frame pps. The clip shell itself resizes
+  // smoothly during a zoom gesture via the --timeline-px-per-frame CSS variable
+  // (no React), while contentPixelsPerSecond only updates ~100ms after the gesture
+  // settles. This stops ClipContent (and the expensive filmstrip tile grid /
+  // waveform render) from re-rendering on every wheel/momentum frame — previously
+  // ~73% of zoom cost. During the gesture the filmstrip is briefly at the pre-zoom
+  // scale, covered by the repeating cover-frame background (zoom-in) or clipped by
+  // overflow:hidden (zoom-out); it snaps sharp on settle.
+  //
+  // preferImmediateRendering (active edit previews — trim/slide) opts back into
+  // the live pps so the content tracks the shell frame-for-frame while the user
+  // is actively dragging an edge, where the settle lag would be distracting.
+  const pixelsPerSecond = useZoomStore((s) =>
+    preferImmediateRendering ? s.pixelsPerSecond : s.contentPixelsPerSecond,
+  )
   const showWaveforms = useSettingsStore((s) => s.showWaveforms)
   const showFilmstrips = useSettingsStore((s) => s.showFilmstrips)
   const clipLeftPx = useMemo(

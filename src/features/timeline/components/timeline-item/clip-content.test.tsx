@@ -131,7 +131,10 @@ describe('ClipContent', () => {
 
     render(<ClipContent item={item} clipLeftFrames={0} clipWidthFrames={96} fps={30} />)
 
-    expect(screen.getByTestId('clip-filmstrip')).toHaveAttribute('data-pps', '180')
+    // Default (no preferImmediateRendering): filmstrip tracks the SETTLED zoom
+    // (contentPixelsPerSecond = 100), not the live in-gesture pps (180). This is
+    // what keeps the filmstrip tile grid from re-rendering on every zoom frame.
+    expect(screen.getByTestId('clip-filmstrip')).toHaveAttribute('data-pps', '100')
   })
 
   it('can opt clip internals into live zoom for immediate edit previews', () => {

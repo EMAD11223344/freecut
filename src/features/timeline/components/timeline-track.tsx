@@ -1,6 +1,7 @@
 import { useState, useRef, memo, useCallback, useEffect, useLayoutEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { createLogger } from '@/shared/logging/logger'
+import { perfMarkRender } from '@/shared/logging/perf-marks'
 
 const logger = createLogger('TimelineTrack')
 import type {
@@ -251,6 +252,7 @@ const TimelineTrackItems = memo(function TimelineTrackItems({
  */
 
 export const TimelineTrack = memo(function TimelineTrack({ track }: TimelineTrackProps) {
+  perfMarkRender('TimelineTrack')
   const { t } = useTranslation()
   const previewOwnerId = `track:${track.id}`
   const [gapContextMenuRequest, setGapContextMenuRequest] =

@@ -13,6 +13,7 @@ import { useSelectionStore } from '@/shared/state/selection'
 import { useEditorStore } from '@/shared/state/editor'
 import { useSourcePlayerStore } from '@/shared/state/source-player'
 import { usePlaybackStore } from '@/shared/state/playback'
+import { perfMarkRender } from '@/shared/logging/perf-marks'
 import { useTransitionDragStore } from '@/shared/state/transition-drag'
 import { TRANSITION_CONFIGS } from '@/types/transition'
 import { useMediaLibraryStore } from '@/features/timeline/deps/media-library-store'
@@ -228,6 +229,7 @@ export const TimelineItem = memo(
     trackLocked = false,
     trackHidden = false,
   }: TimelineItemProps) {
+    perfMarkRender('TimelineItem')
     // Granular selector: only re-render when THIS item's selection state changes
     const isSelected = useSelectionStore(
       useCallback((s) => s.selectedItemIdSet.has(item.id), [item.id]),
