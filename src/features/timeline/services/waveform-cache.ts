@@ -37,14 +37,15 @@ import {
 
 const logger = createLogger('WaveformCache')
 
-// Memory cache configuration.
-// 20MB was too small to hold a single long clip's full-resolution peaks
-// (1000 samples/sec stereo ≈ 28.8MB/hour), so SizedAccessedMemoryCache rejected
-// them outright (oversized items are never cached). That forced an async OPFS
-// reload — and a loading-skeleton flash — on every mount/remount, e.g. when a
-// clip is dragged to another track (which remounts it under a new track row).
-// 128MB holds several hours of stereo waveform so realistic long clips stay
-// resident and remounts hit the sync cache instead of reloading.
+// Memory cache budget — the working-set ceiling for resident waveforms.
+// Full-resolution peaks are ~28.8MB/hour (1000 samples/sec, stereo), so the
+// old 20MB held under an hour total and a single long clip evicted everything
+// else. 128MB keeps several hours of waveform resident so the clips around the
+// viewport stay cached and remounts (e.g. dragging a clip to another track) hit
+// the sync cache instead of reloading with a skeleton flash.
+// Note: SizedAccessedMemoryCache retains entries larger than this budget rather
+// than dropping them, so a single clip longer than ~4.5h is still cached (it
+// just evicts the rest of the working set while resident).
 const MAX_CACHE_SIZE_BYTES = 128 * 1024 * 1024 // 128MB
 const MAX_CONCURRENT_WAVEFORM_GENERATIONS = 1
 const WAVEFORM_PROGRESS_NOTIFY_INTERVAL_MS = 120
