@@ -12,7 +12,19 @@ export interface AudioDecodeRequest {
   storageSampleRate: number
 }
 
-export type AudioDecodeWorkerMessage = AudioDecodeRequest
+export interface AudioDecodeWindowRequest {
+  type: 'decode-window'
+  requestId: string
+  mediaId: string
+  src: string | Blob
+  sourceMetadata?: ObjectUrlSourceMetadata | null
+  fallbackBlob?: Blob | null
+  startTime: number
+  durationSeconds: number
+  storageSampleRate: number
+}
+
+export type AudioDecodeWorkerMessage = AudioDecodeRequest | AudioDecodeWindowRequest
 
 export interface AudioDecodeBinResponse {
   type: 'bin'
@@ -31,6 +43,18 @@ export interface AudioDecodeCompleteResponse {
   totalBins: number
 }
 
+/** A decoded playback window — Float32 stereo (not persisted, no quantization). */
+export interface AudioDecodeWindowResponse {
+  type: 'window'
+  requestId: string
+  startTime: number
+  frames: number
+  sampleRate: number
+  /** Float32 PCM, transferred. */
+  left: ArrayBuffer
+  right: ArrayBuffer
+}
+
 export interface AudioDecodeErrorResponse {
   type: 'error'
   requestId: string
@@ -40,4 +64,5 @@ export interface AudioDecodeErrorResponse {
 export type AudioDecodeWorkerResponse =
   | AudioDecodeBinResponse
   | AudioDecodeCompleteResponse
+  | AudioDecodeWindowResponse
   | AudioDecodeErrorResponse

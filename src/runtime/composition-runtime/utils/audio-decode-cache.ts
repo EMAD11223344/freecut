@@ -529,7 +529,12 @@ export async function getOrDecodeAudioSliceForPlayback(
     }
 
     try {
-      const slice = await decodeAudioWindow(mediaId, src, partialStartTime, partialDurationSeconds)
+      const slice = await decodeAudioWindowPreferWorker(
+        mediaId,
+        src,
+        partialStartTime,
+        partialDurationSeconds,
+      )
       rememberPlaybackSlice(mediaId, slice)
       return slice
     } catch (windowError) {
@@ -604,21 +609,34 @@ export function clearPreviewAudioCache(): void {
 // Off-thread full decode (worker)
 // ---------------------------------------------------------------------------
 
+// Two lanes so a foreground playback-window decode is never stuck behind a slow
+// background full decode on the same worker thread.
 let audioDecodeWorkerManager: ManagedWorker | null = null
+let audioWindowWorkerManager: ManagedWorker | null = null
 let audioDecodeRequestCounter = 0
 
 function canUseAudioDecodeWorker(): boolean {
   return typeof Worker !== 'undefined'
 }
 
+function createAudioDecodeWorker(): Worker {
+  return new Worker(new URL('./audio-decode-worker.ts', import.meta.url), { type: 'module' })
+}
+
+/** Background lane for full decodes. */
 function getAudioDecodeWorker(): Worker {
   if (!audioDecodeWorkerManager) {
-    audioDecodeWorkerManager = createManagedWorker({
-      createWorker: () =>
-        new Worker(new URL('./audio-decode-worker.ts', import.meta.url), { type: 'module' }),
-    })
+    audioDecodeWorkerManager = createManagedWorker({ createWorker: createAudioDecodeWorker })
   }
   return audioDecodeWorkerManager.getWorker()
+}
+
+/** Foreground lane for latency-sensitive playback-window decodes. */
+function getAudioWindowWorker(): Worker {
+  if (!audioWindowWorkerManager) {
+    audioWindowWorkerManager = createManagedWorker({ createWorker: createAudioDecodeWorker })
+  }
+  return audioWindowWorkerManager.getWorker()
 }
 
 /**
@@ -687,7 +705,7 @@ function decodeFullAudioViaWorker(mediaId: string, src: PreviewAudioSource): Pro
             reject(err instanceof Error ? err : new Error(String(err)))
           }
         })
-      } else {
+      } else if (message.type === 'error') {
         cleanup()
         reject(new Error(message.error))
       }
@@ -713,6 +731,87 @@ function decodeFullAudioViaWorker(mediaId: string, src: PreviewAudioSource): Pro
       storageSampleRate: STORAGE_SAMPLE_RATE,
     })
   })
+}
+
+function decodeAudioWindowViaWorker(
+  mediaId: string,
+  src: PreviewAudioSource,
+  startTime: number,
+  durationSeconds: number,
+): Promise<PlaybackAudioSlice> {
+  return new Promise<PlaybackAudioSlice>((resolve, reject) => {
+    const worker = getAudioWindowWorker()
+    const requestId = `audio-window-${++audioDecodeRequestCounter}`
+
+    const cleanup = () => {
+      worker.removeEventListener('message', onMessage)
+      worker.removeEventListener('error', onError)
+    }
+
+    const onMessage = (event: MessageEvent<AudioDecodeWorkerResponse>) => {
+      const message = event.data
+      if (message.requestId !== requestId) {
+        return
+      }
+
+      if (message.type === 'window') {
+        cleanup()
+        try {
+          const ctx = new OfflineAudioContext(2, message.frames, message.sampleRate)
+          const buffer = ctx.createBuffer(2, message.frames, message.sampleRate)
+          buffer.getChannelData(0).set(new Float32Array(message.left))
+          buffer.getChannelData(1).set(new Float32Array(message.right))
+          resolve({ buffer, startTime: message.startTime, isComplete: false })
+        } catch (err) {
+          reject(err instanceof Error ? err : new Error(String(err)))
+        }
+      } else if (message.type === 'error') {
+        cleanup()
+        reject(new Error(message.error))
+      }
+    }
+
+    const onError = (event: ErrorEvent) => {
+      cleanup()
+      reject(event.error instanceof Error ? event.error : new Error('Audio window worker error'))
+    }
+
+    worker.addEventListener('message', onMessage)
+    worker.addEventListener('error', onError)
+
+    const prepared = prepareWorkerSource(src)
+    worker.postMessage({
+      type: 'decode-window',
+      requestId,
+      mediaId,
+      src: prepared.src,
+      sourceMetadata: prepared.sourceMetadata,
+      fallbackBlob: prepared.fallbackBlob,
+      startTime,
+      durationSeconds,
+      storageSampleRate: STORAGE_SAMPLE_RATE,
+    })
+  })
+}
+
+/** Prefer an off-thread window decode; fall back to the main thread on failure. */
+async function decodeAudioWindowPreferWorker(
+  mediaId: string,
+  src: PreviewAudioSource,
+  startTime: number,
+  durationSeconds: number,
+): Promise<PlaybackAudioSlice> {
+  if (canUseAudioDecodeWorker()) {
+    try {
+      return await decodeAudioWindowViaWorker(mediaId, src, startTime, durationSeconds)
+    } catch (err) {
+      log.warn('Worker window decode failed, falling back to main-thread window decode', {
+        mediaId,
+        err,
+      })
+    }
+  }
+  return decodeAudioWindow(mediaId, src, startTime, durationSeconds)
 }
 
 // ---------------------------------------------------------------------------
