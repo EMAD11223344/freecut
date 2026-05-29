@@ -2,11 +2,9 @@
  * Final render outputs from the export queue.
  *
  * Saves to the project's own `projects/{id}/exports/` folder so outputs are
- * grouped with the project and removed with it. `listExportFiles` also surfaces
- * any loose files in the legacy top-level `exports/` folder so older renders
- * (made before per-project exports) stay visible. Read/delete are addressed by
- * full path, so they work for both locations. Filenames are de-duplicated
- * (` (2)`, ` (3)`, …) so re-rendering a segment doesn't overwrite a result.
+ * grouped with the project and removed with it. Read/delete are addressed by
+ * full path. Filenames are de-duplicated (` (2)`, ` (3)`, …) so re-rendering a
+ * segment doesn't overwrite a previous result.
  */
 
 import { getWorkspaceRoot, requireWorkspaceRoot } from './root'
@@ -15,7 +13,6 @@ import {
   EXPORTS_DIR,
   PROJECTS_DIR,
   exportFilePath,
-  exportsDir,
   projectExportFilePath,
   projectExportsDir,
   sanitizeWorkspaceFileName,
@@ -35,8 +32,6 @@ export interface ExportFileEntry {
   lastModified: number
   /** Workspace-relative path segments — used to read/delete the file. */
   path: string[]
-  /** True for loose files in the top-level `exports/` folder (no project). */
-  legacy: boolean
 }
 
 /** Insert a ` (n)` suffix before the extension: `clip.mp4` → `clip (2).mp4`. */
@@ -66,7 +61,8 @@ async function uniqueFileName(
 /**
  * Save a rendered blob to the project's `exports/` folder, returning the final
  * filename and workspace-relative path. Falls back to a top-level `exports/`
- * only when no project id is given. Throws if no workspace root is set.
+ * only when no project id is given (shouldn't happen in the editor). Throws if
+ * no workspace root is set.
  */
 export async function saveExportFile(
   projectId: string | undefined,
@@ -84,40 +80,19 @@ export async function saveExportFile(
   return { fileName: name, relPath: `${relBase}/${name}` }
 }
 
-async function listDir(
-  root: FileSystemDirectoryHandle,
-  dir: string[],
-  pathOf: (name: string) => string[],
-  legacy: boolean,
-): Promise<ExportFileEntry[]> {
-  const files = await readDirectoryFiles(root, dir)
-  return files.map(({ name, blob }) => ({
-    name,
-    size: blob.size,
-    // readDirectoryFiles hands back File handles, so lastModified is available
-    // without reading the bytes.
-    lastModified: (blob as File).lastModified ?? 0,
-    path: pathOf(name),
-    legacy,
-  }))
-}
-
-/**
- * List a project's saved exports plus any loose files in the legacy top-level
- * `exports/` folder, newest first.
- */
+/** List a project's saved export files, newest first. Empty when none. */
 export async function listExportFiles(projectId: string): Promise<ExportFileEntry[]> {
-  const root = requireWorkspaceRoot()
-  const [projectFiles, legacyFiles] = await Promise.all([
-    listDir(
-      root,
-      projectExportsDir(projectId),
-      (name) => projectExportFilePath(projectId, name),
-      false,
-    ),
-    listDir(root, exportsDir(), (name) => exportFilePath(name), true),
-  ])
-  return [...projectFiles, ...legacyFiles].sort((a, b) => b.lastModified - a.lastModified)
+  const files = await readDirectoryFiles(requireWorkspaceRoot(), projectExportsDir(projectId))
+  return files
+    .map(({ name, blob }) => ({
+      name,
+      size: blob.size,
+      // readDirectoryFiles hands back File handles, so lastModified is available
+      // without reading the bytes.
+      lastModified: (blob as File).lastModified ?? 0,
+      path: projectExportFilePath(projectId, name),
+    }))
+    .sort((a, b) => b.lastModified - a.lastModified)
 }
 
 /** Read an export's bytes (for download). Null when missing. */

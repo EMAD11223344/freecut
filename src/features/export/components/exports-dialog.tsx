@@ -196,8 +196,7 @@ function ExportsList({ projectId }: { projectId: string }) {
 /**
  * Dedicated dialog for the render queue and the saved export files. The Queue
  * tab shows this session's jobs; the Exports tab browses the project's
- * `projects/<id>/exports/` folder (plus any loose files in the legacy top-level
- * `exports/` folder) and lets you download / delete them.
+ * `projects/<id>/exports/` folder and lets you download / delete them.
  */
 export function ExportsDialog({ open, onClose, projectId }: ExportsDialogProps) {
   const { t } = useTranslation()
