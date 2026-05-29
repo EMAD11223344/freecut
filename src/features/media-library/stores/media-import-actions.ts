@@ -62,11 +62,36 @@ function removeImportPlaceholder(set: Set, tempId: string): void {
   }))
 }
 
-function replaceImportPlaceholder(set: Set, tempId: string, metadata: MediaMetadata): void {
-  set((state) => ({
-    mediaItems: state.mediaItems.map((item) => (item.id === tempId ? metadata : item)),
-    importingIds: state.importingIds.filter((id) => id !== tempId),
-  }))
+/**
+ * Drop the optimistic placeholder and guarantee the resolved media record is
+ * visible in the library exactly once.
+ *
+ * Used for BOTH fresh imports and "duplicate" results. A re-imported file is
+ * flagged `isDuplicate` whenever it already has a `media-links.json`
+ * association with the project — but that association can outlive the file's
+ * presence in the in-memory library (the user removed it from the library
+ * view, or the association was re-backfilled from a lingering timeline clip).
+ * The old duplicate path only removed the placeholder, so re-importing such a
+ * file showed "already exists in library" while the file stayed invisible and
+ * un-recoverable without a full reload. Surfacing it here fixes that.
+ *
+ * Also resilient to a concurrent `loadMediaItems()` wiping the placeholder
+ * mid-import: the record is prepended rather than silently dropped.
+ */
+function ensureImportedMediaVisible(set: Set, tempId: string, metadata: MediaMetadata): boolean {
+  let wasAlreadyVisible = false
+  set((state) => {
+    const withoutPlaceholder = state.mediaItems.filter((item) => item.id !== tempId)
+    wasAlreadyVisible = withoutPlaceholder.some((item) => item.id === metadata.id)
+
+    return {
+      mediaItems: wasAlreadyVisible
+        ? withoutPlaceholder.map((item) => (item.id === metadata.id ? metadata : item))
+        : [metadata, ...withoutPlaceholder],
+      importingIds: state.importingIds.filter((id) => id !== tempId),
+    }
+  })
+  return wasAlreadyVisible
 }
 
 function prependImportedMedia(set: Set, metadata: MediaMetadata): void {
@@ -112,15 +137,20 @@ function processImportResults(
     if (result.status === 'fulfilled') {
       const { metadata, tempId, file, handle } = result.value
 
-      if (metadata.isDuplicate) {
-        removeImportPlaceholder(set, tempId)
+      const wasAlreadyVisible = ensureImportedMediaVisible(set, tempId, metadata)
+
+      // "already exists in library" should only fire for a genuine no-op:
+      // re-importing a file that is ALREADY visible in this project's library.
+      // A file flagged `isDuplicate` merely has a project↔media association —
+      // which the by-design cross-workspace dedup re-creates when you re-import
+      // a file you'd removed. Surfacing that as "already exists" is wrong; it's
+      // a normal (re-)add, so fall through to the import branch with no banner.
+      if (metadata.isDuplicate && wasAlreadyVisible) {
         duplicateNames.push(file.name)
         if (options?.includeDuplicatesInResults) {
           results.push(metadata)
         }
       } else {
-        replaceImportPlaceholder(set, tempId, metadata)
-
         setupImportedVideoProxy(metadata)
         results.push(metadata)
         importedCount += 1
