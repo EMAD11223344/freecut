@@ -72,6 +72,7 @@ import {
   type ClientAudioContainer,
 } from '../utils/client-renderer'
 import { ExportPreviewPlayer } from './export-preview-player'
+import { SaveToWorkspacePanel } from '@/infrastructure/supabase/save-to-workspace-panel'
 
 export interface ExportDialogProps {
   open: boolean
@@ -1286,6 +1287,14 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
         {view === 'complete' && (
           <div className="space-y-4 py-4">
             {previewUrl && <ExportPreviewPlayer src={previewUrl} isVideo={isVideoResult} />}
+
+            {clientRender.result?.blob && (
+              <SaveToWorkspacePanel
+                blob={clientRender.result.blob}
+                filename={`${renderWholeProject ? 'freecut-export' : 'freecut-trim'}.${videoContainer}`}
+                durationSeconds={framesToSeconds(exportRange.duration, fps)}
+              />
+            )}
 
             <Alert className="border-green-900 bg-green-950">
               <CheckCircle2 className="h-4 w-4 text-green-500" />

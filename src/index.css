@@ -9,59 +9,58 @@
 
 @layer base {
   :root {
-    /* Professional Video Editor Dark Theme - OKLCH Colors */
-    /* Inspired by Premiere Pro & DaVinci Resolve */
+    /* Business-OS Arena Style Theme — Pure black canvas, neon accents */
 
-    /* Base - Very dark, reduced eye strain */
-    --background: oklch(0.15 0 0); /* #262626 - Main canvas */
-    --foreground: oklch(0.95 0 0); /* #f2f2f2 - Primary text */
+    /* Base — True black canvas (#000) */
+    --background: oklch(0 0 0);
+    --foreground: oklch(0.95 0 0);
 
-    /* Panels - Layered depth */
-    --card: oklch(0.18 0 0); /* #2e2e2e - Panel backgrounds */
-    --card-foreground: oklch(0.92 0 0); /* #ebebeb - Panel text */
+    /* Panels — Charcoal #111 with layered depth */
+    --card: oklch(0.07 0 0);
+    --card-foreground: oklch(0.9 0 0);
 
-    --popover: oklch(0.16 0 0); /* #292929 - Dropdowns */
-    --popover-foreground: oklch(0.92 0 0);
+    --popover: oklch(0.05 0 0);
+    --popover-foreground: oklch(0.9 0 0);
 
-    /* Primary - Orange accent (playback, active states) */
-    --primary: oklch(0.68 0.19 45); /* #FF8C3A - Vibrant orange */
-    --primary-foreground: oklch(0.12 0 0); /* Dark text on primary */
+    /* Primary — Neon purple gradient (#a855f7 → #7c3aed) */
+    --primary: oklch(0.6 0.25 310);
+    --primary-foreground: oklch(0.12 0 0);
 
-    /* Secondary - Subtle panel variation */
-    --secondary: oklch(0.22 0 0); /* #383838 - Secondary surfaces */
-    --secondary-foreground: oklch(0.88 0 0);
+    /* Secondary */
+    --secondary: oklch(0.1 0 0);
+    --secondary-foreground: oklch(0.85 0 0);
 
-    /* Muted - Backgrounds and disabled states */
-    --muted: oklch(0.2 0 0); /* #333333 - Muted backgrounds */
-    --muted-foreground: oklch(0.6 0 0); /* #999999 - Muted text */
+    /* Muted */
+    --muted: oklch(0.08 0 0);
+    --muted-foreground: oklch(0.5 0 0);
 
-    /* Accent - Hover states and highlights */
-    --accent: oklch(0.24 0 0); /* #3d3d3d - Hover backgrounds */
+    /* Accent — Neon purple for hover highlights */
+    --accent: oklch(0.15 0.1 310);
     --accent-foreground: oklch(0.95 0 0);
 
-    /* Destructive - Red for delete/errors */
-    --destructive: oklch(0.58 0.22 25); /* #E53E3E - Error red */
+    /* Destructive — Red */
+    --destructive: oklch(0.58 0.22 25);
     --destructive-foreground: oklch(0.98 0 0);
 
-    /* Borders - Subtle separators */
-    --border: oklch(0.25 0 0); /* #404040 - Borders */
-    --input: oklch(0.24 0 0); /* #3d3d3d - Input borders */
-    --ring: oklch(0.68 0.19 45); /* Orange focus ring */
+    /* Borders — White/10 (#ffffff1a) */
+    --border: oklch(0.15 0 0);
+    --input: oklch(0.12 0 0);
+    --ring: oklch(0.6 0.25 310);
 
-    /* Panel system - Layered depth */
-    --panel-bg: oklch(0.18 0 0); /* #2e2e2e - Panels */
-    --panel-header: oklch(0.14 0 0); /* #242424 - Panel headers */
-    --timeline-bg: oklch(0.12 0 0); /* #1f1f1f - Timeline darker */
+    /* Panel system — Charcoal #111 */
+    --panel-bg: oklch(0.07 0 0);
+    --panel-header: oklch(0.04 0 0);
+    --timeline-bg: oklch(0.03 0 0);
 
     /* Sidebar */
-    --sidebar: oklch(0.18 0 0);
-    --sidebar-foreground: oklch(0.92 0 0);
-    --sidebar-primary: oklch(0.68 0.19 45);
+    --sidebar: oklch(0.07 0 0);
+    --sidebar-foreground: oklch(0.9 0 0);
+    --sidebar-primary: oklch(0.6 0.25 310);
     --sidebar-primary-foreground: oklch(0.12 0 0);
-    --sidebar-accent: oklch(0.22 0 0);
-    --sidebar-accent-foreground: oklch(0.92 0 0);
-    --sidebar-border: oklch(0.25 0 0);
-    --sidebar-ring: oklch(0.68 0.19 45);
+    --sidebar-accent: oklch(0.1 0.05 310);
+    --sidebar-accent-foreground: oklch(0.9 0 0);
+    --sidebar-border: oklch(0.15 0 0);
+    --sidebar-ring: oklch(0.6 0.25 310);
 
     --radius: 0.5rem;
   }
