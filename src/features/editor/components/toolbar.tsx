@@ -228,18 +228,20 @@ export const Toolbar = memo(function Toolbar({
           <Keyboard className="h-4 w-4" />
         </Button>
         <LanguageSwitcher size="sm" align="end" side="bottom" />
-        <Button variant="outline" size="icon" className="h-7 w-7" asChild>
-          <a
-            href="https://github.com/walterlow/freecut"
-            target="_blank"
-            rel="noopener noreferrer"
-            data-tooltip={t('toolbar.viewOnGitHub')}
-            data-tooltip-side="bottom"
-            aria-label={t('toolbar.viewOnGitHub')}
-          >
-            <Github className="h-4 w-4" />
-          </a>
-        </Button>
+        {!import.meta.env.VITE_EMBEDDED && (
+          <Button variant="outline" size="icon" className="h-7 w-7" asChild>
+            <a
+              href="https://github.com/walterlow/freecut"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-tooltip={t('toolbar.viewOnGitHub')}
+              data-tooltip-side="bottom"
+              aria-label={t('toolbar.viewOnGitHub')}
+            >
+              <Github className="h-4 w-4" />
+            </a>
+          </Button>
+        )}
         <Button
           variant="outline"
           size="sm"

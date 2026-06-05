@@ -135,15 +135,17 @@ export function WhatsNewDialog({ open, onOpenChange }: WhatsNewDialogProps) {
               ? t('editor.whatsNew.released', { version: latestReleaseVersion })
               : t('editor.whatsNew.preRelease')}
           </span>
-          <a
-            href={`${GITHUB_REPO_URL}/blob/main/CHANGELOG.md`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1 hover:text-foreground hover:underline"
-          >
-            {t('editor.whatsNew.fullChangelog')}
-            <ExternalLink className="h-3 w-3" />
-          </a>
+          {!import.meta.env.VITE_EMBEDDED && (
+            <a
+              href={`${GITHUB_REPO_URL}/blob/main/CHANGELOG.md`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 hover:text-foreground hover:underline"
+            >
+              {t('editor.whatsNew.fullChangelog')}
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          )}
         </div>
       </DialogContent>
     </Dialog>
