@@ -61,3 +61,43 @@ create policy "Users can insert their own projects"
 on public.video_projects for insert
 to authenticated
 with check (auth.uid() = user_id);
+
+-- ============================================
+-- 3. FreeCut workspace projects table
+-- ============================================
+create table if not exists public.freecut_projects (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  workspace_id text not null,
+  title text not null,
+  description text not null default '',
+  project_data text not null default '{}',
+  file_size_bytes bigint not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_freecut_projects_workspace
+on public.freecut_projects (workspace_id, user_id, updated_at desc);
+
+alter table public.freecut_projects enable row level security;
+
+create policy "Users can read their workspace projects"
+on public.freecut_projects for select
+to authenticated
+using (true);
+
+create policy "Users can insert their own projects"
+on public.freecut_projects for insert
+to authenticated
+with check (auth.uid() = user_id);
+
+create policy "Users can update their own projects"
+on public.freecut_projects for update
+to authenticated
+using (auth.uid() = user_id);
+
+create policy "Users can delete their own projects"
+on public.freecut_projects for delete
+to authenticated
+using (auth.uid() = user_id);

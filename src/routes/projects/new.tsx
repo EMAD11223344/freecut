@@ -8,7 +8,7 @@ import { useCreateProject } from '@/features/projects/hooks/use-project-actions'
 import { useProjectStore } from '@/features/projects/stores/project-store'
 import { FreeCutLogo } from '@/components/brand/freecut-logo'
 import { Button } from '@/components/ui/button'
-import { Github } from 'lucide-react'
+import { Github, HardDrive, Cloud } from 'lucide-react'
 import type { ProjectFormData } from '@/features/projects/utils/validation'
 
 const logger = createLogger('NewProject')
@@ -29,6 +29,7 @@ function NewProject() {
   const navigate = useNavigate()
   const { t } = useTranslation()
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [saveDestination, setSaveDestination] = useState<'local' | 'workspace'>('local')
   const createProject = useCreateProject()
 
   const handleSubmit = async (data: ProjectFormData) => {
@@ -62,6 +63,32 @@ function NewProject() {
           <Link to="/">
             <FreeCutLogo variant="full" size="md" className="hover:opacity-80 transition-opacity" />
           </Link>
+          {import.meta.env.VITE_EMBEDDED && (
+            <div className="flex items-center gap-1 p-0.5 bg-muted/30 rounded-lg border border-border mr-3">
+              <button
+                onClick={() => setSaveDestination('local')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  saveDestination === 'local'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <HardDrive className="w-3.5 h-3.5" />
+                Local
+              </button>
+              <button
+                onClick={() => setSaveDestination('workspace')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  saveDestination === 'workspace'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Cloud className="w-3.5 h-3.5" />
+                Workspace
+              </button>
+            </div>
+          )}
           <Button variant="outline" size="icon" className="h-10 w-10" asChild>
             <a
               href="https://github.com/walterlow/freecut"
@@ -79,6 +106,25 @@ function NewProject() {
       {/* Content */}
       <div className="max-w-7xl mx-auto px-6 py-8">
         <ProjectForm onSubmit={handleSubmit} isSubmitting={isSubmitting} hideHeader={true} />
+        {import.meta.env.VITE_EMBEDDED && (
+          <div className="mt-4 p-3 rounded-lg border border-border bg-muted/20">
+            <div className="flex items-center gap-2 text-sm">
+              {saveDestination === 'local' ? (
+                <>
+                  <HardDrive className="w-4 h-4 text-primary" />
+                  <span className="text-foreground font-medium">Save to Local</span>
+                  <span className="text-muted-foreground">— stored in browser memory for this session</span>
+                </>
+              ) : (
+                <>
+                  <Cloud className="w-4 h-4 text-primary" />
+                  <span className="text-foreground font-medium">Save to Workspace</span>
+                  <span className="text-muted-foreground">— synced to workspace cloud storage</span>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

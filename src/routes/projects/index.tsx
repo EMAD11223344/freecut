@@ -6,7 +6,8 @@ import { createLogger } from '@/shared/logging/logger'
 
 const logger = createLogger('ProjectsIndex')
 import { Button } from '@/components/ui/button'
-import { Plus, Upload, FolderOpen, File, Github } from 'lucide-react'
+import { Plus, Upload, FolderOpen, File, Github, HardDrive, Cloud } from 'lucide-react'
+import { WorkspaceProjectsTab } from '@/features/projects/components/workspace-projects-tab'
 import { FreeCutLogo } from '@/components/brand/freecut-logo'
 import { ProjectList } from '@/features/projects/components/project-list'
 import { ProjectForm } from '@/features/projects/components/project-form'
@@ -51,6 +52,7 @@ export const Route = createFileRoute('/projects/')({
 function ProjectsIndex() {
   const navigate = useNavigate()
   const { t } = useTranslation()
+  const [activeTab, setActiveTab] = useState<'local' | 'workspace'>('local')
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -307,6 +309,36 @@ function ProjectsIndex() {
           </div>
         </div>
 
+        {/* Tab bar — Local vs Workspace (embedded mode only) */}
+        {import.meta.env.VITE_EMBEDDED && (
+          <div className="max-w-[1920px] mx-auto px-6 pt-4">
+            <div className="flex items-center gap-1 p-1 bg-muted/30 rounded-lg border border-border w-fit">
+              <button
+                onClick={() => setActiveTab('local')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  activeTab === 'local'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <HardDrive className="w-4 h-4" />
+                Local Projects
+              </button>
+              <button
+                onClick={() => setActiveTab('workspace')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  activeTab === 'workspace'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Cloud className="w-4 h-4" />
+                Workspace
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Error state */}
         {error && (
           <div className="max-w-[1920px] mx-auto px-6 py-4">
@@ -332,11 +364,16 @@ function ProjectsIndex() {
               <p className="text-muted-foreground">{t('projects.loadingProjects')}</p>
             </div>
           </div>
+        ) : import.meta.env.VITE_EMBEDDED && activeTab === 'workspace' ? (
+          /* Workspace Projects */
+          <div className="max-w-[1920px] mx-auto px-6 py-8">
+            <WorkspaceProjectsTab workspaceId="default" />
+          </div>
         ) : (
-          /* Projects List */
+          /* Local Projects */
           <div className="max-w-[1920px] mx-auto px-6 py-8">
             <ProjectList onEditProject={handleEditProject} />
-            <TrashSection />
+            {activeTab === 'local' && <TrashSection />}
           </div>
         )}
       </div>
