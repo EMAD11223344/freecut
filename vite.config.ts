@@ -17,6 +17,7 @@ const toolIgnorePatterns = [
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: process.env.VITE_EMBEDDED ? '/freecut/' : '/',
   lint: {
     ...oxlintConfig,
     ignorePatterns: toolIgnorePatterns,

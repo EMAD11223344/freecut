@@ -7,7 +7,8 @@ import { PwaInstallPrompt } from '@/app/pwa-install-prompt'
 import { WorkspaceGate } from '@/features/workspace-gate/workspace-gate'
 import { routeTree } from './routeTree.gen'
 
-const router = createRouter({ routeTree })
+const basepath = import.meta.env.VITE_EMBEDDED ? '/freecut' : undefined
+const router = createRouter({ routeTree, ...(basepath ? { basepath } : {}) })
 const LazyToaster = lazy(async () => {
   const { Toaster } = await import('@/components/ui/sonner')
   return { default: Toaster }
