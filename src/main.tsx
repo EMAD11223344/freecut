@@ -213,7 +213,7 @@ window.addEventListener('vite:preloadError', () => {
 // should survive refresh/reload.
 // The browser tears down workers/resources on navigation anyway.
 
-if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+if (import.meta.env.PROD && !import.meta.env.VITE_EMBEDDED && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker
       .register(`${import.meta.env.BASE_URL}sw.js`)

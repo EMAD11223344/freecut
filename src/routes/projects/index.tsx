@@ -271,17 +271,19 @@ function ProjectsIndex() {
             <div className="flex items-center gap-3">
               <WorkspaceIndicator />
               <LanguageSwitcher size="md" align="end" side="bottom" />
-              <Button variant="outline" size="icon" className="h-10 w-10" asChild>
-                <a
-                  href="https://github.com/walterlow/freecut"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  data-tooltip={t('projects.viewOnGitHub')}
-                  data-tooltip-side="left"
-                >
-                  <Github className="w-5 h-5" />
-                </a>
-              </Button>
+              {!import.meta.env.VITE_EMBEDDED && (
+                <Button variant="outline" size="icon" className="h-10 w-10" asChild>
+                  <a
+                    href="https://github.com/walterlow/freecut"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-tooltip={t('projects.viewOnGitHub')}
+                    data-tooltip-side="left"
+                  >
+                    <Github className="w-5 h-5" />
+                  </a>
+                </Button>
+              )}
               <Button variant="outline" size="lg" className="gap-2" onClick={handleImportClick}>
                 <Upload className="w-4 h-4" />
                 {t('projects.importProject')}

@@ -53,8 +53,16 @@ type GateStatus =
 
 export function WorkspaceGate({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<GateStatus>({ kind: 'initializing' })
-  const pathname = usePathname()
-  const needsWorkspace = isStorageProtectedPath(pathname)
+  const rawPathname = usePathname()
+
+  // In embedded mode (VITE_EMBEDDED=true), the workspace root is managed by
+  // the parent Business-OS app — skip the File System Access gate entirely
+  // so the app renders without requiring a folder picker inside the iframe.
+  if (import.meta.env.VITE_EMBEDDED) {
+    return <>{children}</>
+  }
+
+  const needsWorkspace = isStorageProtectedPath(rawPathname)
 
   const activate = useCallback(async (handle: FileSystemDirectoryHandle) => {
     setWorkspaceRoot(handle)
