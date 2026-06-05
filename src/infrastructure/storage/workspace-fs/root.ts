@@ -187,8 +187,13 @@ class InMemoryRoot {
   }
 }
 
+let inMemoryRootInstance: InMemoryRoot | null = null
+
 function createNoopRootProxy(): FileSystemDirectoryHandle {
-  return new InMemoryRoot() as unknown as FileSystemDirectoryHandle
+  if (!inMemoryRootInstance) {
+    inMemoryRootInstance = new InMemoryRoot()
+  }
+  return inMemoryRootInstance as unknown as FileSystemDirectoryHandle
 }
 
 /**
