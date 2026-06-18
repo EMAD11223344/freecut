@@ -31,9 +31,10 @@ export default defineConfig({
     ...oxfmtConfig,
     ignorePatterns: toolIgnorePatterns,
   },
-  staged: {
-    '*.{js,ts,tsx,json}': 'vp check --fix',
-  },
+  // Disabled: vp requires Node.js >=22.18.0 (current: 22.13.0)
+  // staged: {
+  //   '*.{js,ts,tsx,json}': 'vp check --fix',
+  // },
   test: {
     globals: true,
     environment: 'jsdom',
