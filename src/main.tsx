@@ -10,6 +10,36 @@ import {
 } from '@/shared/projects/last-editor-project'
 import './index.css'
 
+// Iframe auth: receive Supabase session from parent Business-OS app.
+// This runs during module evaluation (before React renders), so the session
+// is in localStorage by the time any supabase-js call reads it.
+(function() {
+  var PARENT_ORIGIN = 'https://business-os-frontend-delta.vercel.app';
+  var STORAGE_KEY = 'sb-dyokeszugekykbxeeibx-auth-token';
+
+  if (window.parent === window) return;
+
+  window.parent.postMessage({ type: 'FREECUT_READY' }, PARENT_ORIGIN);
+
+  window.addEventListener('message', function onSession(event) {
+    if (event.origin !== PARENT_ORIGIN) return;
+    if (event.data?.type !== 'SUPABASE_SESSION') return;
+    var access_token = event.data.access_token;
+    var refresh_token = event.data.refresh_token;
+    if (!access_token || !refresh_token) return;
+    window.removeEventListener('message', onSession);
+
+    var sessionData = JSON.stringify({
+      access_token: access_token,
+      refresh_token: refresh_token,
+      expires_in: 3600,
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+      token_type: 'bearer',
+    });
+    try { localStorage.setItem(STORAGE_KEY, sessionData); } catch(e) {}
+  }, { once: true });
+})();
+
 const log = createLogger('App')
 const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000
 const ACCEPTED_APP_UPDATE_SIGNATURE_KEY = 'freecut-accepted-app-update-signature'
